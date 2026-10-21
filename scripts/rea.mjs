@@ -3,11 +3,53 @@
 import { access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import v8 from "node:v8";
+import { spawnSync } from "node:child_process";
 
 // Route production MCP before importing Incur. Incur owns registration helpers
 // such as `mcp add`, while the MCP runtime serves the tool catalog over stdio
 // or, with `--http`, over streamable HTTP.
 const args = process.argv.slice(2);
+
+function findMaxHeapMb(cliArgs) {
+  for (let i = 0; i < cliArgs.length; i++) {
+    if (cliArgs[i] === "--max-heap-mb" && cliArgs[i + 1]) {
+      const val = Number.parseInt(cliArgs[i + 1], 10);
+      if (Number.isSafeInteger(val) && val > 0) return val;
+    }
+    if (cliArgs[i]?.startsWith("--max-heap-mb=")) {
+      const val = Number.parseInt(
+        cliArgs[i].slice("--max-heap-mb=".length),
+        10,
+      );
+      if (Number.isSafeInteger(val) && val > 0) return val;
+    }
+  }
+  return undefined;
+}
+
+const requestedMaxHeapMb = findMaxHeapMb(args);
+if (
+  requestedMaxHeapMb !== undefined &&
+  process.env.REA_CLI_HEAP_SPAWNED !== "1" &&
+  typeof v8.getHeapStatistics === "function"
+) {
+  const heapStats = v8.getHeapStatistics();
+  const currentLimitMb = Math.round(heapStats.heap_size_limit / (1024 * 1024));
+  if (requestedMaxHeapMb > currentLimitMb) {
+    const env = { ...process.env, REA_CLI_HEAP_SPAWNED: "1" };
+    const child = spawnSync(
+      process.execPath,
+      [
+        `--max-old-space-size=${requestedMaxHeapMb}`,
+        fileURLToPath(import.meta.url),
+        ...args,
+      ],
+      { stdio: "inherit", env },
+    );
+    process.exit(child.status ?? (child.signal ? 1 : 0));
+  }
+}
 const { default: packageJson } = await import("../package.json", {
   with: { type: "json" },
 });

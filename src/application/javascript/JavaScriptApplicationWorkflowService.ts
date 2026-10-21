@@ -173,6 +173,9 @@ export const compareApplicationVersionsEvidenceValidated = (
           right_native_evidence_ids: rightNative.map(
             ({ evidence_id: id }) => id,
           ),
+          ...(input.max_heap_mb === undefined
+            ? {}
+            : { max_heap_mb: input.max_heap_mb }),
         },
         result,
       ),

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { emptyArraySchema } from "../emptyArraySchema.js";
 import { evidenceSchema } from "../evidence.js";
+import { javaScriptAnalysisResourceControlsSchema } from "./javascriptAnalysisResourceControls.js";
 import {
   isValidatedImmutableJavaScriptApplicationGraph,
   javascriptApplicationGraphSchema,
@@ -67,6 +68,7 @@ export const compareApplicationVersionsInputSchema = z
     right: evidenceSchema,
     left_native_observations: z.array(evidenceSchema).default([]),
     right_native_observations: z.array(evidenceSchema).default([]),
+    max_heap_mb: javaScriptAnalysisResourceControlsSchema.shape.max_heap_mb,
   })
   .superRefine(validateApplicationVersionIdentities);
 
