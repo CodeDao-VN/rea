@@ -545,9 +545,11 @@ it("counts all JavaScript summary limitations when the message budget truncates 
   if (result.value.kind !== "summary")
     throw new Error("expected summary view");
 
-  expect(result.value.limitations).toContain(
-    expect.stringContaining("additional limitations omitted"),
-  );
+  expect(
+    result.value.limitations.some((message) =>
+      message.includes("additional limitations omitted"),
+    ),
+  ).toBe(true);
   expect(result.value.limitations.length).toBeLessThan(
     expectedLimitations.length,
   );
