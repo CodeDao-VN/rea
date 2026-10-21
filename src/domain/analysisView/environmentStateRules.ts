@@ -420,13 +420,14 @@ export const renderStateList = (
   items: readonly JsonObject[],
 ): JsonValue =>
   view.counters.reduce(
-    (body, name) =>
-      replaceAt(
-        body,
-        pointerTo(name),
-        typeof at(base, pointerTo(name)) === "string"
-          ? String(items.length)
-          : items.length,
-      ),
+    (body, name) => {
+      const recorded = at(base, pointerTo(name));
+      if (typeof recorded !== "string") {
+        return replaceAt(body, pointerTo(name), items.length);
+      }
+      return Number(recorded) === items.length
+        ? body
+        : replaceAt(body, pointerTo(name), String(items.length));
+    },
     replaceAt(base, view.pointer, [...items]),
   );
