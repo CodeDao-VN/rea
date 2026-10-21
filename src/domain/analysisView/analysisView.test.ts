@@ -505,7 +505,6 @@ it("counts parent and semantic graph limitations in the JavaScript summary", () 
     throw new Error("expected summary view");
 
   expect(result.value.summary.limitation_count).toBe(5);
-  expect(result.value.summary.limitation_count).toBe(5);
   expect(result.value.limitations).toEqual([
     "Analysis limitation.",
     "Application graph limitation.",
