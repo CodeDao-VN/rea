@@ -26,8 +26,10 @@ limitation. Exact names establish name correspondence, not unchanged code or
 original-source identity.
 
 For unmatched candidates, optionally supply `left_observations` and
-`right_observations`. `procedure_info` or existing `analyze_function` Evidence
-gives exact inclusive body ranges; `read_bytes` supplies memory bytes. Observations
+`right_observations`. `procedure_info` or existing `analyze_function` dossiers
+give exact inclusive body ranges; `read_bytes` supplies memory bytes. An MCP
+`analyze_function` summary reply is not a dossier: pass its
+`parent_evidence_id` as a `retained-evidence` reference instead. Observations
 must belong to the side's exact target/provider/profile and document context.
 Adjacent, consistent overlapping and partially returned reads compose by their
 observed extent; conflicting intervals remain gaps. A byte match requires every
@@ -78,9 +80,9 @@ inventory Evidence and the owning inventory’s `source_index`, preserving same-
 One validation, lazy member index and bounded recent filter are retained per
 immutable parent; no live target state is cached.
 
-When both functions already have unambiguous `analyze_function` dossiers, a matched
-relation includes `compare_functions_input` with directly usable retained
-references. Otherwise analyze just the selected canonical addresses in their
+When both functions already have unambiguous `analyze_function` dossiers in the
+observations, a matched relation includes `compare_functions_input` with
+directly usable retained references. Otherwise analyze just the selected canonical addresses in their
 respective targets, then compare those dossiers. Matching never claims behavioral
 equivalence. Optional informative CFG/call/string fingerprints from supplied
 dossiers connect unresolved candidate groups only. They require observed CFG,

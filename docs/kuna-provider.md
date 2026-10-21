@@ -70,7 +70,7 @@ The assembly label index is scanned once per export reader. Cancelling a request
 
 Regex procedure and string search uses ECMAScript Unicode matching in a cancellable worker with a five-second matching deadline and a 128 MiB worker heap. Literal matching remains the default. Cancellation or a matching deadline leaves the session available. This release has no runtime override for that deadline or heap.
 
-Single-function subprocess output and each cached source facet share a 16 MiB buffered-text capacity. Cached spans are checked before allocation; larger text remains in the local export and the error identifies the file and range. `analyze_function` initially returns the complete dossier, which can still be large; later retained views do not remove that first transfer. Prefer the individual text tools for a focused question.
+Single-function subprocess output and each cached source facet share a 16 MiB buffered-text capacity. Cached spans are checked before allocation; larger text remains in the local export and the error identifies the file and range. `analyze_function` with `detail: "complete"` (the CLI default) returns the complete dossier inline, which can still be large; later retained views do not remove that first transfer. The MCP default retains the dossier and returns its summary, so page the facets you need through `inspect_analysis_view`, or prefer the individual text tools for a focused question.
 
 ## Strings
 

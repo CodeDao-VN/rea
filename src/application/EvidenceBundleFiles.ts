@@ -21,6 +21,7 @@ import {
   bufferedJsonParts,
   canonicalJsonParts,
 } from "../domain/jsonSerialization.js";
+import { requireAuthenticationHeadroom } from "./EvidenceAuthenticationHeadroom.js";
 import { readJsonFile, writeTextParts } from "./JsonFiles.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 
@@ -78,6 +79,12 @@ const readBundle = async (
         cause: signal.reason,
       }),
     );
+  const headroom = requireAuthenticationHeadroom(
+    loaded.value,
+    path,
+    "import_evidence_bundle",
+  );
+  if (!headroom.ok) return headroom;
   let bundle: EvidenceBundle;
   try {
     bundle = parseBundle(loaded.value);
