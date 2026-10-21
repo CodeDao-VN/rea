@@ -3176,6 +3176,38 @@ describe("TypeScript declaration fallback ownership", () => {
   });
 });
 
+describe("explicit TypeScript declaration require ownership", () => {
+  const container = "container";
+
+  it.each([
+    ["./dep.d.ts", "src/dep.d.ts"],
+    ["./cfg.d.mts", "src/cfg.d.mts"],
+    ["./legacy.d.cts", "src/legacy.d.cts"],
+  ] as const)(
+    "resolves explicit %s to its exact declaration in both loader modes",
+    (specifier, target) => {
+      const files = fileMap([
+        file("src/main.ts", container),
+        file(target, container, "export declare const value: number;"),
+      ]);
+      for (const moduleKind of ["import", "require"] as const) {
+        expect(
+          resolve({
+            declaredPath: specifier,
+            sourcePath: "src/main.ts",
+            context: "module-specifier",
+            moduleKind,
+            files,
+          }),
+        ).toMatchObject({
+          resolution_status: "resolved",
+          resolved_path: target,
+        });
+      }
+    },
+  );
+});
+
 describe("url-reference directory and empty-segment semantics", () => {
   it.each([
     "./worker.js/.",

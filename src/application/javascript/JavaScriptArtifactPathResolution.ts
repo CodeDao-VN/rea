@@ -1476,10 +1476,13 @@ const resolveCandidate = (
   emittedSourceCandidates: readonly TypeScriptEmittedSourceCandidate[] = [],
 ): CandidateResolution => {
   if (!commonJsDirectoryRequest(input)) {
+    // An explicitly written declaration path is exact static evidence; only
+    // emitted-extension fallbacks to declarations are downgraded.
     const file =
       resolveFileCandidates(
         input,
         fileCandidates(candidate, input.moduleKind),
+        input.context === "module-specifier" ? candidate : undefined,
       ) ??
       resolveRuntimeSourceCandidates(input, candidate, emittedSourceCandidates);
     if (file !== null) return file;
@@ -1626,11 +1629,13 @@ const resolveNodePackageMain = (
 const resolveFileCandidates = (
   input: ResolveArtifactPathInput,
   candidates: readonly string[],
+  explicitPath?: string,
 ): CandidateResolution | null => {
   for (const path of candidates) {
     const selected = findFileCandidate(input, path);
     if (selected === null) continue;
     return selected.status === "resolved" &&
+      path !== explicitPath &&
       isRuntimeDeclarationPath(input, path)
       ? {
           resolvedPath: null,

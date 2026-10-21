@@ -15,6 +15,13 @@ const registerOwnedRizinCommandOutcomeTests = (options: {
   it.each([
     ["normal exit", providerSnapshot(), "complete", 0, false],
     [
+      "normal exit with omitted output",
+      providerSnapshot({ diagnosticTruncated: true }),
+      "complete",
+      0,
+      true,
+    ],
+    [
       "non-zero exit",
       providerSnapshot({ exitCode: 7, diagnosticTruncated: true }),
       "complete",

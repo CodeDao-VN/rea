@@ -19,8 +19,8 @@ import {
   type ManagedToolName,
 } from "../contracts/managed/managedToolContracts.js";
 import {
+  AnalysisSnapshotMismatchError,
   EvidenceFileError,
-  EvidenceIntegrityError,
 } from "../domain/evidenceErrors.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
@@ -595,7 +595,7 @@ const prepareSnapshot = async (options: {
   if (!target.ok) return target;
   if (!snapshotMatchesTarget(loaded.value.target, target.value))
     return err(
-      new EvidenceIntegrityError(
+      new AnalysisSnapshotMismatchError(
         "Analysis snapshot target does not match the requested binary",
       ),
     );
