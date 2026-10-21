@@ -103,7 +103,11 @@ const readSequence = (
   count: Result<number, PyInstallerFailure>,
 ): Result<MarshalValue, PyInstallerFailure> => {
   if (!count.ok) return count;
-  if (count.value < 0 || count.value > MAX_SEQUENCE)
+  if (count.value < 0)
+    return err(
+      pyInstallerFailure("format", "PYZ marshal sequence count is negative"),
+    );
+  if (count.value > MAX_SEQUENCE)
     return err(
       pyInstallerFailure(
         "limit",
@@ -236,7 +240,9 @@ const readBytes = (
   cursor: MarshalCursor,
   length: number,
 ): Result<Buffer, PyInstallerFailure> => {
-  if (!Number.isSafeInteger(length) || length < 0 || length > MAX_STRING_BYTES)
+  if (length < 0)
+    return err(pyInstallerFailure("format", "PYZ marshal length is negative"));
+  if (!Number.isSafeInteger(length) || length > MAX_STRING_BYTES)
     return err(
       pyInstallerFailure(
         "limit",

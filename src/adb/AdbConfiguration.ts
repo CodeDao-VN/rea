@@ -90,6 +90,7 @@ export const parseAdbVersionOutput = (stdout: string): AdbClientIdentity => {
  */
 export const inspectAdbClient = async (
   selection: AdbBinarySelection,
+  operation: string,
   signal?: AbortSignal,
 ): Promise<AdbClientIdentity> => {
   try {
@@ -123,7 +124,7 @@ export const inspectAdbClient = async (
     if (cause instanceof AdbConfigurationFailure) throw cause;
     const failure = execFileOutputFailure(cause);
     if (cause instanceof ExecFileOutputCancelledError)
-      throw new AnalysisCancelledError("inspect_adb_client", {
+      throw new AnalysisCancelledError(operation, {
         cause: cause.cause,
         ...(failure === undefined
           ? {}
@@ -143,7 +144,7 @@ export const inspectAdbClient = async (
     };
     if (failure?.outputTruncated === true) {
       throw new AnalysisResourceConstraintError(
-        "inspect_adb_client",
+        operation,
         "memory",
         `adb version output exceeded the ${String(VERSION_MAX_OUTPUT_BYTES)}-byte capture budget`,
         { max_output_bytes: VERSION_MAX_OUTPUT_BYTES },
@@ -157,7 +158,7 @@ export const inspectAdbClient = async (
       );
     }
     if (failure?.code === "ETIMEDOUT")
-      throw new AnalysisTimeoutError("inspect_adb_client", VERSION_TIMEOUT_MS, {
+      throw new AnalysisTimeoutError(operation, VERSION_TIMEOUT_MS, {
         ...options,
         userMessage: `adb version probe reached its ${String(VERSION_TIMEOUT_MS)} ms deadline (deadlineExpired). This release has no runtime override.`,
         remediationAction: `This ${String(VERSION_TIMEOUT_MS)} ms adb version probe has no runtime override. Allow execution, cleanup and delivery headroom in the outer MCP client deadline. Confirm outstanding work and cleanup before retrying.`,

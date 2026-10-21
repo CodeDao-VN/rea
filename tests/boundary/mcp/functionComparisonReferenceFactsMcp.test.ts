@@ -208,6 +208,43 @@ const verifyReferences = async (
   });
 };
 
+it("names each side whose Evidence is not analyze_function", async () => {
+  const { client } = await createHarness();
+  const valid = evidence("valid-side", "a");
+  const wrongKind = createEvidence(
+    {
+      path: "/fixture/function-reference/wrong-kind",
+      sha256: "b".repeat(64),
+      format: "mach-o",
+    },
+    example.provider,
+    {
+      operation: "analyze_binary",
+      parameters: { observation: "wrong-kind" },
+      result: {},
+      confidence: "observed",
+      authority: "shipped-artifact",
+    },
+  );
+  const response = await client.callTool({
+    name: "compare_functions",
+    arguments: { left: valid, right: wrongKind },
+  });
+  expect(response.isError).toBe(true);
+  const body = JSON.parse(
+    (response.content as { type: string; text: string }[])[0]!.text,
+  ) as { error: { details: { issues: unknown[] } } };
+  expect(body.error.details.issues).toEqual([
+    expect.objectContaining({
+      path: ["right"],
+      reason: "invalid_value",
+      message: expect.stringContaining(
+        "the right Evidence has operation analyze_binary",
+      ),
+    }),
+  ]);
+});
+
 it("preserves reference identity uncertainty and same-artifact coordinates", async () => {
   const { client } = await createHarness();
   const namedLeft = evidence("named-left", "a", [

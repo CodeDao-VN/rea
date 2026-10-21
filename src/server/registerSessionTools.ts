@@ -203,6 +203,7 @@ const registerOpenLifecycleTool = (
                     snapshotPath,
                     context.mcpReq.signal,
                     artifactResources,
+                    "open_binary",
                   ),
               }),
         }),

@@ -413,13 +413,21 @@ export const renderStateEntity = (
   );
 };
 
-/** A list response rendered from `base`: its array replaced by `items` and its counters set to their number. */
+/** A list response rendered from `base`: its array replaced by `items` and its counters set to their number, keeping a counter recorded as a string as a string. */
 export const renderStateList = (
   view: Pick<StateListView, "pointer" | "counters">,
   base: JsonValue,
   items: readonly JsonObject[],
 ): JsonValue =>
   view.counters.reduce(
-    (body, name) => replaceAt(body, pointerTo(name), items.length),
+    (body, name) => {
+      const recorded = at(base, pointerTo(name));
+      if (typeof recorded !== "string") {
+        return replaceAt(body, pointerTo(name), items.length);
+      }
+      return Number(recorded) === items.length
+        ? body
+        : replaceAt(body, pointerTo(name), String(items.length));
+    },
     replaceAt(base, view.pointer, [...items]),
   );

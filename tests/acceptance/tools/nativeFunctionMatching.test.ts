@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { expect } from "vitest";
+import { expect, it } from "vitest";
 import { cliTest, type TestCli } from "../../support/cli/cliFixture.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { connectLocalToolsMcp } from "../../fixtures/localToolsMcp.js";
@@ -271,6 +271,91 @@ cliTest(
       right: reference(right.evidence_id),
     });
     expect(missing.isError).toBe(true);
+  },
+  60000,
+);
+
+cliTest(
+  "names a malformed inline Evidence field on the CLI matching path",
+  async ({ cli }) => {
+    const fixture = await createMatchingFixture();
+    const inputPath = join(fixture.root, "malformed-request.json");
+    await writeFile(
+      inputPath,
+      JSON.stringify({
+        left: "not-evidence",
+        right: fixture.right,
+        left_observations: fixture.leftDetails,
+        right_observations: fixture.rightDetails,
+        detail: "complete",
+      }),
+    );
+    const result = await cli.run({
+      arguments: [
+        "match-native-functions",
+        inputPath,
+        "--source_bundle",
+        fixture.ancestorsPath,
+        "--evidence_output",
+        join(fixture.root, "malformed-result.json"),
+        "--json",
+      ],
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.json).toMatchObject({
+      code: "invalid_request",
+      details: {
+        issues: [
+          expect.objectContaining({ path: ["left"], reason: "invalid_value" }),
+        ],
+      },
+    });
+  },
+  60000,
+);
+
+it.each([
+  ["left", { left: "not-evidence" }, ["left"]],
+  ["right", { right: "not-evidence" }, ["right"]],
+  [
+    "left observation",
+    (fixture: Awaited<ReturnType<typeof createMatchingFixture>>) => ({
+      left_observations: [fixture.leftDetails[0], "not-evidence"],
+    }),
+    ["left_observations", 1],
+  ],
+  [
+    "right observation",
+    (fixture: Awaited<ReturnType<typeof createMatchingFixture>>) => ({
+      right_observations: ["not-evidence", fixture.rightDetails[0]],
+    }),
+    ["right_observations", 0],
+  ],
+] as const)(
+  "names the malformed %s in match_native_functions input issues",
+  async (_name, malformed, path) => {
+    const fixture = await createMatchingFixture();
+    const { call } = await connectLocalToolsMcp();
+    const replacement =
+      typeof malformed === "function" ? malformed(fixture) : malformed;
+    const response = await call("match_native_functions", {
+      left: fixture.left,
+      right: fixture.right,
+      left_observations: fixture.leftDetails,
+      right_observations: fixture.rightDetails,
+      detail: "complete",
+      ...replacement,
+    });
+    expect(response.isError).toBe(true);
+    const body = JSON.parse(
+      (response.content as { type: string; text: string }[])[0]!.text,
+    ) as { error: { code: string; details: { issues: unknown[] } } };
+    expect(body.error).toMatchObject({
+      code: "invalid_request",
+      details: {
+        issues: [expect.objectContaining({ path, reason: "invalid_value" })],
+      },
+    });
   },
   60000,
 );

@@ -743,3 +743,42 @@ it.runIf(!unsupportedHost).each(["directory", "missing-interpreter"])(
     expect(await readFile(path, "utf8")).toBe("source-owned-seam-bytes");
   },
 );
+
+/** Minimal ELF64 header whose program-header table offset is caller-controlled. */
+const elf64WithProgramHeaderOffset = (offset: bigint): Buffer => {
+  const header = Buffer.alloc(64);
+  header.write("\x7fELF", 0, "latin1");
+  header[4] = 2;
+  header[5] = 1;
+  header[6] = 1;
+  header.writeUInt16LE(3, 16);
+  header.writeUInt16LE(62, 18);
+  header.writeUInt32LE(1, 20);
+  header.writeBigUInt64LE(offset, 32);
+  header.writeUInt16LE(64, 52);
+  header.writeUInt16LE(56, 54);
+  header.writeUInt16LE(1, 56);
+  header.writeUInt16LE(64, 58);
+  return header;
+};
+
+// Exercises the real pwntools bridge; runs only when REA_PWNTOOLS_PYTHON points at the pinned runtime.
+it.runIf(!unsupportedHost && process.env.REA_PWNTOOLS_PYTHON !== undefined)(
+  "classifies an overflowing program-header offset as an invalid format, not an execution failure",
+  async () => {
+    const { path } = await fixture();
+    await writeFile(path, elf64WithProgramHeaderOffset(0x8000000000000040n));
+    const result = await new PwntoolsLayoutProvider({
+      REA_PWNTOOLS_PYTHON: process.env.REA_PWNTOOLS_PYTHON ?? "",
+    }).inspect({ path });
+    if (result.ok) throw new Error("Expected a malformed ELF refusal");
+    expect(projectAnalysisError(result.error)).toMatchObject({
+      code: "invalid_request",
+      details: {
+        issues: [
+          expect.objectContaining({ path: ["path"], reason: "invalid_format" }),
+        ],
+      },
+    });
+  },
+);

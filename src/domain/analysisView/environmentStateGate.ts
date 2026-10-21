@@ -191,7 +191,9 @@ const listFacts = (
         Object.keys(parent).some((name) => continues(name, parent[name]))
       )
         all = false;
-      const names = counted.filter((name) => parent[name] === items.length);
+      const names = counted.filter(
+        (name) => countOf(parent[name]) === items.length,
+      );
       counters = (counters ?? names).filter((name) => names.includes(name));
     });
   return { all, counters: (counters ?? []).sort(compare) };

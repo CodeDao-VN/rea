@@ -25,7 +25,7 @@ it("names the adb version-probe deadline and says it has no runtime override", a
       killed: true,
     }),
   );
-  const failure = await inspectAdbClient(selection).catch(
+  const failure = await inspectAdbClient(selection, "inspect_adb_client").catch(
     (cause: unknown) => cause,
   );
   expect(failure).toBeInstanceOf(AnalysisTimeoutError);
@@ -39,6 +39,29 @@ it("names the adb version-probe deadline and says it has no runtime override", a
   expect(projected.remediation.action).toContain("no runtime override");
 });
 
+it("attributes version-output limits to the requested operation", async () => {
+  vi.mocked(execFileOutput).mockRejectedValueOnce(
+    Object.assign(new Error("too much"), {
+      code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+      stdout: "",
+      stderr: "",
+      signal: null,
+      killed: false,
+      outputTruncated: true,
+    }),
+  );
+  const failure = await inspectAdbClient(selection, "list_adb_devices").catch(
+    (cause: unknown) => cause,
+  );
+  const projected = projectAnalysisError(
+    failure as Parameters<typeof projectAnalysisError>[0],
+  );
+  expect(projected).toMatchObject({
+    code: "resource_constraint",
+    details: { operation: "list_adb_devices" },
+  });
+});
+
 it("names the adb version-output cap and says it has no runtime override", async () => {
   vi.mocked(execFileOutput).mockRejectedValueOnce(
     Object.assign(new Error("too much"), {
@@ -50,7 +73,7 @@ it("names the adb version-output cap and says it has no runtime override", async
       outputTruncated: true,
     }),
   );
-  const failure = await inspectAdbClient(selection).catch(
+  const failure = await inspectAdbClient(selection, "inspect_adb_client").catch(
     (cause: unknown) => cause,
   );
   const projected = projectAnalysisError(

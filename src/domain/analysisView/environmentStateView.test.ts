@@ -260,6 +260,28 @@ it("leaves a type recorded when a value changed across a write already in flight
   });
 });
 
+it("counts a digit-string total that equals the number listed", () => {
+  const state = stateOf(
+    captureOf([["GET", "/api/items", { total: "1", items: [{ id: 1 }] }]]),
+  );
+  expect(viewOf(state, "get_items")).toMatchObject({
+    shape: "list",
+    membership: "all",
+    counters: ["total"],
+  });
+});
+
+it("keeps a padded digit-string total's spelling and still lists the whole collection", () => {
+  const state = stateOf(
+    captureOf([["GET", "/api/items", { total: "01", items: [{ id: 1 }] }]]),
+  );
+  expect(viewOf(state, "get_items")).toMatchObject({
+    shape: "list",
+    membership: "all",
+    counters: ["total"],
+  });
+});
+
 it("does not list the whole collection when a counter exceeds the number listed", () => {
   const state = stateOf(
     captureOf([

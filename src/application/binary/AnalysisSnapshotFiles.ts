@@ -26,6 +26,7 @@ export const readAnalysisSnapshot = async (
   path: string,
   signal?: AbortSignal,
   resources?: ArtifactResourceScope,
+  operation = "read_evidence_file",
 ): Promise<
   Result<
     AnalysisSnapshot,
@@ -55,6 +56,7 @@ export const readAnalysisSnapshot = async (
   try {
     const loaded = await readJsonObjectMembersFile(
       path,
+      operation,
       [
         new Map([
           ["entries", entries.reader],
@@ -79,7 +81,7 @@ export const readAnalysisSnapshot = async (
   } catch (cause: unknown) {
     if (cause instanceof RegularFileCleanupFailure) throw cause;
     if (signal?.aborted === true)
-      return err(new AnalysisCancelledError("read_evidence_file", { cause }));
+      return err(new AnalysisCancelledError(operation, { cause }));
     return err(
       new EvidenceIntegrityError(snapshotValidationMessage(cause), { cause }),
     );

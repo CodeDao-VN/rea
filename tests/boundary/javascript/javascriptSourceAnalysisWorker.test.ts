@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
+import { unlinkSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -742,3 +743,48 @@ require("node:readline").createInterface({ input: process.stdin }).once("line", 
     }
   },
 );
+
+it("reports a worker source read failure as a provider adapter failure, not unreadable output", async () => {
+  let injected = false;
+  const worker = new JavaScriptAnalysisWorker(
+    { heapMb: 128, timeoutMs: 30_000 },
+    async (request) => {
+      const spawned = await spawnOwnedProviderProcess(request);
+      const stdin = spawned.process.stdin!;
+      const write = stdin.write.bind(stdin);
+      stdin.write = ((frame: string, ...args: unknown[]) => {
+        const data = JSON.parse(String(frame)) as {
+          id: string;
+          file?: unknown;
+        };
+        if (data.file !== undefined && !injected) {
+          injected = true;
+          unlinkSync(join(request.cwd!, `${data.id}.source`));
+        }
+        return write(frame, ...(args as [])) as boolean;
+      }) as typeof stdin.write;
+      return spawned;
+    },
+  );
+  try {
+    const result = await worker.analyze(
+      source("io.mjs", "export const observed = 1;"),
+      { nodes: 100, unknowns: 100 },
+    );
+    if (result.ok) throw new Error("expected the source read to fail");
+    expect(injected).toBe(true);
+    expect(projectAnalysisError(result.error.error)).toMatchObject({
+      code: "execution_failure",
+      details: {
+        provider_id: expect.any(String),
+        diagnostics: {
+          source_path: "io.mjs",
+          phase: expect.any(String),
+          io_message: expect.stringContaining("ENOENT"),
+        },
+      },
+    });
+  } finally {
+    await worker.close();
+  }
+});

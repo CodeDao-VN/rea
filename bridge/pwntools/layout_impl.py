@@ -302,7 +302,7 @@ def inspect_elf(path, cache):
             }
         except LayoutFailure:
             raise
-        except (ELFError, ValueError, AssertionError, IndexError) as error:
+        except (ELFError, ValueError, AssertionError, IndexError, OverflowError) as error:
             raise LayoutFailure("format", "Selected ELF failed unchanged upstream structural parsing: " + str(error)) from error
 
 
