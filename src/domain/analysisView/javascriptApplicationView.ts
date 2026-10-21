@@ -392,7 +392,7 @@ export const projectJavaScriptApplicationView = (
           application_unknowns: sourceCoverage.application_unknown_count,
           semantic_unknowns: sourceCoverage.semantic_unknown_count,
         }),
-        limitation_count: shared.limitations.length,
+        limitation_count: javascriptApplicationLimitations(parent, analysis).length,
       },
       coverage: completeCoverage(moduleCount, moduleCount),
       ...shared,
