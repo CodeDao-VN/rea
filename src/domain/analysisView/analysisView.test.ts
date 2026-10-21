@@ -514,6 +514,48 @@ it("counts parent and semantic graph limitations in the JavaScript summary", () 
   ]);
 });
 
+it("counts all JavaScript summary limitations when the message budget truncates them", () => {
+  const analysis = analysisViewJavaScriptAnalysis();
+  const messages = ["a".repeat(2_400), "b".repeat(2_400), "c".repeat(2_400)];
+  const { graph_id: _graphId, ...semantic } = analysis.semantic_graph;
+  const semanticGraph = createJavaScriptSemanticGraph({
+    ...semantic,
+    limitations: [],
+  });
+  const parent = {
+    ...javascriptParent({
+      ...analysis,
+      limitations: messages,
+      graph: { ...analysis.graph, limitations: [] },
+      semantic_graph: semanticGraph,
+    }),
+    limitations: [],
+  };
+  const expectedLimitations = [
+    ...new Set([
+      ...parent.limitations,
+      ...analysis.limitations,
+      ...analysis.graph.limitations,
+      ...analysis.semantic_graph.limitations,
+    ]),
+  ].sort();
+
+  const result = projectAnalysisView(parent, { kind: "summary" });
+  if (!result.ok) throw result.error;
+  if (result.value.kind !== "summary")
+    throw new Error("expected summary view");
+
+  expect(result.value.limitations).toContain(
+    expect.stringContaining("additional limitations omitted"),
+  );
+  expect(result.value.limitations.length).toBeLessThan(
+    expectedLimitations.length,
+  );
+  expect(result.value.summary.limitation_count).toBe(
+    expectedLimitations.length,
+  );
+});
+
 it("projects JavaScript summary and preserves selected module observations", () => {
   const analysis = analysisViewJavaScriptAnalysisWithSource();
   const parent = javascriptParent(analysis);
