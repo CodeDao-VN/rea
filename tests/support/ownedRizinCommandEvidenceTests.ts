@@ -106,6 +106,11 @@ const registerOwnedRizinCommandOutcomeTests = (options: {
           },
         });
         if (!result.ok) throw new Error("Expected provider Evidence");
+        expect(
+          result.value.limitations
+            .join("\n")
+            .includes("ended before completion"),
+        ).toBe(completion === "unknown" && outputTruncated);
         expect(result.value.parameters).toMatchObject({
           command: "iI",
           provider_executable: "rizin-test",

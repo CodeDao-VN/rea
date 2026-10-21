@@ -685,7 +685,9 @@ export class ReverseEngineeringService {
         : []),
       ...(outputTruncated
         ? [
-            "The provider command ended before completion could be confirmed; captured output is partial.",
+            completionStatus === "complete"
+              ? "The command completed, but part of its captured output was omitted; captured output is partial."
+              : "The provider command ended before completion could be confirmed; captured output is partial.",
           ]
         : []),
       ...(signalName === null

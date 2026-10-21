@@ -3206,6 +3206,28 @@ describe("explicit TypeScript declaration require ownership", () => {
       }
     },
   );
+  it("resolves an explicit bare declaration require to its exact inventoried file", () => {
+    const files = fileMap([
+      file("src/main.ts", container),
+      file(
+        "node_modules/dep.d.ts",
+        container,
+        "export declare const value: number;",
+      ),
+    ]);
+    expect(
+      resolve({
+        declaredPath: "dep.d.ts",
+        sourcePath: "src/main.ts",
+        context: "module-specifier",
+        moduleKind: "require",
+        files,
+      }),
+    ).toMatchObject({
+      resolution_status: "resolved",
+      resolved_path: "node_modules/dep.d.ts",
+    });
+  });
 });
 
 describe("url-reference directory and empty-segment semantics", () => {
