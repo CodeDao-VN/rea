@@ -57,6 +57,11 @@ import {
   semanticWriteTargets,
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
+import {
+  SEMANTIC_MEMBER_MUTATION_WORKLIST_LIMIT,
+  SEMANTIC_MEMBER_MUTATION_TOTAL_STEPS_LIMIT,
+  SEMANTIC_MEMBER_MUTATION_FIXPOINT_ROUNDS_LIMIT,
+} from "./javascriptSemanticResourceLimits.js";
 
 type PropertyPath = JavaScriptSemanticPropertyPath;
 type ValueEffect = "write" | "escape";
@@ -168,6 +173,15 @@ export function* collectSemanticMemberMutationsSteps(
   const returnedReferences = createSemanticReturnedReferences(state);
   const recordedRequiredEffects = new Set<string>();
   let recordedEffectCount = 0;
+  let totalMutationSteps = 0;
+  let mutationLimitHit = false;
+
+  const markMutationResourceLimit = (): void => {
+    if (!mutationLimitHit) {
+      mutationLimitHit = true;
+      state.valueResourceLimits.add("alias-selections");
+    }
+  };
   const recordRequiredEffect = (
     specifier: string,
     path: PropertyPath,
@@ -348,9 +362,18 @@ export function* collectSemanticMemberMutationsSteps(
         ...(ownerInitializer === undefined ? {} : { ownerInitializer }),
       },
     ];
+    if (mutationLimitHit) return;
     // Visit shallower alias traversals first so their exact prefixes suppress
     // longer loop paths before those paths enumerate every assignment order.
     for (let cursor = 0; cursor < pending.length; cursor++) {
+      if (cursor >= SEMANTIC_MEMBER_MUTATION_WORKLIST_LIMIT) {
+        markMutationResourceLimit();
+        break;
+      }
+      if (++totalMutationSteps > SEMANTIC_MEMBER_MUTATION_TOTAL_STEPS_LIMIT) {
+        markMutationResourceLimit();
+        break;
+      }
       const current = pending[cursor];
       if (current === undefined) break;
       const expression = unwrapJavaScriptExpression(current.node).node;
@@ -876,11 +899,17 @@ export function* collectSemanticMemberMutationsSteps(
   });
   // A later effect can make a previously defined destructuring source uncertain.
   // Reconsider defaults and iterable origins until their effects are stable.
+  const processedIterableKeys = new WeakMap<IterableReference, string>();
+  let fixpointRounds = 0;
   while (
     pendingReferences.length > 0 ||
     iterableReferences.length > 0 ||
     deferredMapReceivers.size > 0
   ) {
+    if (++fixpointRounds > SEMANTIC_MEMBER_MUTATION_FIXPOINT_ROUNDS_LIMIT) {
+      markMutationResourceLimit();
+      break;
+    }
     const effectsBefore = recordedEffectCount;
     const iterablesBefore = iterableReferences.length;
     const iterationBefore: boolean = state.arrayIterationUnknown;
@@ -953,11 +982,16 @@ export function* collectSemanticMemberMutationsSteps(
       // Treat its root as escaped, including writes through yielded references.
       const knownArray = semanticKnownArrayIteration(slot?.value, state);
       if (knownArray && reference.iterationOnly) continue;
+      const effectKind = knownArray ? reference.effect : "escape";
+      const effectPath = knownArray ? reference.path : reference.fallbackPath;
+      const key = `${effectKind}\0${JSON.stringify(effectPath)}\0${knownArray}`;
+      if (processedIterableKeys.get(reference) === key) continue;
+      processedIterableKeys.set(reference, key);
       markValue(
         reference.node,
-        knownArray ? reference.path : reference.fallbackPath,
+        effectPath,
         reference.bindings,
-        knownArray ? reference.effect : "escape",
+        effectKind,
         reference.mutation,
         reference.originAt,
         undefined,
@@ -1280,8 +1314,13 @@ const observableMutationPaths = (
         link(expressionNode(source.node), observer);
     }
   }
+  let settleSteps = 0;
   const settle = (): void => {
     while (pendingExpressions.length > 0 || pending.length > 0) {
+      if (++settleSteps > SEMANTIC_MEMBER_MUTATION_TOTAL_STEPS_LIMIT) {
+        state.valueResourceLimits.add("alias-selections");
+        break;
+      }
       while (pendingExpressions.length > 0) {
         const selected = pendingExpressions.pop();
         if (selected === undefined) break;
