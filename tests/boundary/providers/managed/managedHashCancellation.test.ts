@@ -177,3 +177,27 @@ it("preserves an independent read failure when cancellation races with it", asyn
     expect(await client.close()).toMatchObject({ ok: true });
   }
 });
+
+it("keeps the caller abort reason when managed analysis is cancelled at entry", async () => {
+  const directory = await createTestTempDirectory("rea-managed-entry-cancel-");
+  const path = join(directory, "fixture.exe");
+  await writeFile(path, buildManagedPeFixture());
+  const parsed = await parseBinaryTarget(path);
+  if (!parsed.ok) throw parsed.error;
+  const client = new ManagedStaticProvider().createClient(parsed.value);
+  const reason = { reason: "stop before managed analysis" };
+  const controller = new AbortController();
+  controller.abort(reason);
+  try {
+    const result = await client.execute(
+      "inspect_managed_members",
+      {},
+      { signal: controller.signal },
+    );
+    if (result.ok) throw new Error("Pre-cancelled managed analysis succeeded");
+    expect(projectAnalysisError(result.error).code).toBe("cancelled");
+    expect(result.error.cause).toBe(reason);
+  } finally {
+    expect(await client.close()).toMatchObject({ ok: true });
+  }
+});

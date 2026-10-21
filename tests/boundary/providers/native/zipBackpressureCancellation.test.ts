@@ -28,13 +28,15 @@ it("cancels a ZIP read while its consumer is applying backpressure", async () =>
       await once(stream, "readable");
       expect(stream.readableLength).toBeGreaterThan(0);
       const errorEvent = once(stream, "error");
-      controller.abort();
+      const reason = { reason: "stop during backpressure" };
+      controller.abort(reason);
       expect(stream.destroyed).toBe(true);
       const [failure] = await errorEvent;
       expect(failure).toMatchObject({
         name: "ArtifactReaderFailure",
         reason: "cancelled",
       });
+      expect(failure.cancellation?.reason).toBe(reason);
     } finally {
       // Resume an old adapter's stalled producer so a failing regression owns cleanup too.
       stream.resume();

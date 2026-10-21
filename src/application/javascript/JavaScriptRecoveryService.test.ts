@@ -129,6 +129,21 @@ describe("JavaScript recovery workflow", () => {
     if (cancelled.ok) throw new Error("expected cancellation");
     expect(cancelled.error._tag).toBe("AnalysisCancelledError");
   });
+  it("keeps the caller abort reason on pre-cancelled recovery", async () => {
+    const service = new JavaScriptRecoveryService({
+      recover: async () => {
+        throw new Error("port must not execute");
+      },
+    });
+    const reason = { reason: "stop before recovery" };
+    const controller = new AbortController();
+    controller.abort(reason);
+    const cancelled = await service.recover(input, {
+      signal: controller.signal,
+    });
+    if (cancelled.ok) throw new Error("expected cancellation");
+    expect(cancelled.error.cause).toBe(reason);
+  });
   it("rejects additional_paths repeating path or each other", async () => {
     const service = new JavaScriptRecoveryService({
       recover: async () => {

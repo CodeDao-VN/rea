@@ -275,6 +275,7 @@ const runAssetUtil = async (
       throw new ArtifactReaderFailure(
         "cancelled",
         "Asset catalog inspection cancelled",
+        { cause: signal.reason },
       );
     const code =
       typeof cause === "object" && cause !== null && "code" in cause
@@ -310,6 +311,7 @@ const digestBounded = async (
       throw new ArtifactReaderFailure(
         "cancelled",
         "Asset catalog inspection cancelled",
+        { cause: signal.reason },
       );
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     length += bytes.length;

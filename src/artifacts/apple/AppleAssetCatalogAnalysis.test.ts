@@ -9,9 +9,19 @@ import { encodeNibArchiveFixture } from "./NibArchive.fixture.js";
 import type { analyzeInterfaceBuilderBundle } from "./InterfaceBuilderAnalysis.js";
 import { ArtifactReaderFailure } from "../ArtifactReader.js";
 import {
+  ExecFileOutputCancelledError,
+  execFileOutput,
+} from "../../process/ExecFileOutput.js";
+import {
   analyzeAppleAssetCatalogs,
   collectInterfaceBuilderResourceKeys,
 } from "./AppleAssetCatalogAnalysis.js";
+
+vi.mock("../../process/ExecFileOutput.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../process/ExecFileOutput.js")>();
+  return { ...actual, execFileOutput: vi.fn(actual.execFileOutput) };
+});
 
 describe("Apple asset catalog application workflow", () => {
   it("joins only explicit resource-key fields with archive provenance", () => {
@@ -243,6 +253,49 @@ it("keeps recognized image fields on NIBArchive controls out of resource joins",
     runAssetUtil: () => Promise.resolve(JSON.stringify([{ Name: "Toolbar" }])),
   });
   expect(result.resource_key_matches).toEqual([]);
+});
+
+describe("Apple asset catalog cancellation", () => {
+  it("keeps the caller abort reason when the assetutil subprocess is cancelled", async () => {
+    const bundle = await createTestTempDirectory("rea-asset-catalog-cancel-");
+    const resources = join(bundle, "Contents", "Resources");
+    await mkdir(resources, { recursive: true });
+    await writeFile(join(resources, "Assets.car"), "catalog");
+    const reason = { reason: "stop during assetutil" };
+    const controller = new AbortController();
+    vi.mocked(execFileOutput).mockImplementationOnce(() => {
+      controller.abort(reason);
+      return Promise.reject(new ExecFileOutputCancelledError(reason));
+    });
+    const originalPlatform = Object.getOwnPropertyDescriptor(
+      process,
+      "platform",
+    );
+    Object.defineProperty(process, "platform", {
+      ...originalPlatform,
+      value: "darwin",
+    });
+    try {
+      const failure: unknown = await analyzeAppleAssetCatalogs({
+        environment: {},
+        bundlePath: bundle,
+        targetSha256: "a".repeat(64),
+        signal: controller.signal,
+      }).then(
+        () => {
+          throw new Error("expected asset catalog cancellation");
+        },
+        (error: unknown) => error,
+      );
+      expect(failure).toMatchObject({ reason: "cancelled" });
+      expect((failure as ArtifactReaderFailure).cancellation?.reason).toBe(
+        reason,
+      );
+    } finally {
+      if (originalPlatform !== undefined)
+        Object.defineProperty(process, "platform", originalPlatform);
+    }
+  });
 });
 
 describe("Apple asset catalog and Interface Builder concurrency", () => {

@@ -339,7 +339,8 @@ export const recoveryFailureMessage = (cause: unknown): string =>
 
 /** Cancellation remains distinct from malformed source or provider output. */
 export const checkRecoveryCancellation = (signal?: AbortSignal): void => {
-  if (signal?.aborted === true) throw new AnalysisCancelledError(OPERATION);
+  if (signal?.aborted === true)
+    throw new AnalysisCancelledError(OPERATION, { cause: signal.reason });
 };
 
 /** Keep both tool invocations within one operation's execution budget. */

@@ -95,7 +95,11 @@ class ManagedStaticClient implements AnalysisClient {
       );
     try {
       if (options?.signal?.aborted === true)
-        return err(new AnalysisCancelledError(operation));
+        return err(
+          new AnalysisCancelledError(operation, {
+            cause: options.signal.reason,
+          }),
+        );
       const snapshot = this.#snapshotBytes;
       const observed =
         snapshot === undefined
@@ -136,7 +140,11 @@ class ManagedStaticClient implements AnalysisClient {
         return err(this.#cleanupError(operation, cause));
       if (cause instanceof AnalysisError) return err(cause);
       if (options?.signal?.aborted === true)
-        return err(new AnalysisCancelledError(operation));
+        return err(
+          new AnalysisCancelledError(operation, {
+            cause: options.signal.reason,
+          }),
+        );
       // A PE header or section table the reader cannot map is malformed input.
       if (
         cause instanceof ManagedReaderFailure &&

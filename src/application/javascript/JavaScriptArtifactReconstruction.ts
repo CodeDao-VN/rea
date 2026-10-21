@@ -215,7 +215,13 @@ export const reconstructJavaScriptArtifact = async (
       const checkpointCompletedAnalysis = async (): Promise<void> => {
         await setImmediate();
         if (interruption == null && signal?.aborted === true)
-          interruption = new ArtifactOperationError(OPERATION, "cancelled");
+          interruption = new ArtifactOperationError(
+            OPERATION,
+            "cancelled",
+            undefined,
+            undefined,
+            { cause: signal.reason },
+          );
       };
       const reportCompletedPhase = async (
         phase: string,
@@ -426,5 +432,6 @@ const abortIfNeeded = (signal?: AbortSignal): void => {
     throw new ArtifactReaderFailure(
       "cancelled",
       "JavaScript artifact reconstruction cancelled",
+      { cause: signal.reason },
     );
 };

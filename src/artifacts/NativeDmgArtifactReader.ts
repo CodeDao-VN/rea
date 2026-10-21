@@ -21,6 +21,7 @@ import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 import {
   execFileOutput,
   execFileOutputFailure,
+  ExecFileOutputCancelledError,
 } from "../process/ExecFileOutput.js";
 import {
   parseNativeDmgAttachOutput,
@@ -113,7 +114,12 @@ const createSystemHost = (
           { reason: "cancelled" },
           "DMG operation cancelled",
           output?.stdout ?? "",
-          { cause },
+          {
+            cause:
+              cause instanceof ExecFileOutputCancelledError
+                ? cause.cause
+                : cause,
+          },
         );
       const exitCode =
         typeof output?.code === "number" ? output.code : processExitCode(cause);

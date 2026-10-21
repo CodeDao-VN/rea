@@ -13,7 +13,10 @@ import { build } from "plist";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
-import { execFileOutput } from "../../../../src/process/ExecFileOutput.js";
+import {
+  ExecFileOutputCancelledError,
+  execFileOutput,
+} from "../../../../src/process/ExecFileOutput.js";
 import {
   ArtifactReaderFailure,
   type ArtifactEntry,
@@ -27,6 +30,14 @@ import {
   type NativeDmgHost,
 } from "../../../../src/artifacts/NativeDmgArtifactReader.js";
 import { scanCanonicalArtifactInventory } from "../../../../src/artifacts/inventory/scanCanonical.js";
+
+vi.mock("../../../../src/process/ExecFileOutput.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../../../src/process/ExecFileOutput.js")
+    >();
+  return { ...actual, execFileOutput: vi.fn(actual.execFileOutput) };
+});
 
 const createAttachedReader = async (
   path: string,
@@ -1210,6 +1221,44 @@ describe("native DMG command diagnostics", () => {
       reason: "io",
       message: expect.stringContaining('"code":"EACCES"'),
     });
+  });
+});
+
+describe("native DMG system host cancellation", () => {
+  it("keeps the caller abort reason when the system verify command is cancelled", async () => {
+    const reason = { reason: "stop during verify" };
+    const controller = new AbortController();
+    vi.mocked(execFileOutput).mockImplementationOnce(() => {
+      controller.abort(reason);
+      return Promise.reject(new ExecFileOutputCancelledError(reason));
+    });
+    const originalPlatform = Object.getOwnPropertyDescriptor(
+      process,
+      "platform",
+    );
+    Object.defineProperty(process, "platform", {
+      ...originalPlatform,
+      value: "darwin",
+    });
+    try {
+      const failure: unknown = await createAttachedReader(
+        "/tmp/image.dmg",
+        process.env,
+        controller.signal,
+      ).then(
+        () => {
+          throw new Error("expected DMG cancellation");
+        },
+        (error: unknown) => error,
+      );
+      expect(failure).toMatchObject({ reason: "cancelled" });
+      expect((failure as ArtifactReaderFailure).cancellation?.reason).toBe(
+        reason,
+      );
+    } finally {
+      if (originalPlatform !== undefined)
+        Object.defineProperty(process, "platform", originalPlatform);
+    }
   });
 });
 
