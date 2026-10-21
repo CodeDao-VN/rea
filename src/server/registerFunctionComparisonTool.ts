@@ -8,6 +8,7 @@ import {
   parseEvidence,
   type Evidence,
 } from "../domain/evidence.js";
+import { AnalysisInputError } from "../domain/analysisErrorCore.js";
 import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
 import { err } from "../domain/result.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
@@ -61,18 +62,22 @@ export const registerFunctionComparisonTool = (
               contract,
             );
           }
-          if (
-            leftEvidence.operation !== "analyze_function" ||
-            rightEvidence.operation !== "analyze_function" ||
-            leftEvidence.predicate_type !== "rea.analysis" ||
-            rightEvidence.predicate_type !== "rea.analysis"
-          )
+          const wrongKinds = (["left", "right"] as const).flatMap((side) => {
+            const record = side === "left" ? leftEvidence : rightEvidence;
+            return record.operation === "analyze_function" &&
+              record.predicate_type === "rea.analysis"
+              ? []
+              : [
+                  {
+                    path: [side],
+                    reason: "invalid_value" as const,
+                    message: `Expected analyze_function Evidence (predicate rea.analysis); the ${side} Evidence has operation ${record.operation} and predicate ${record.predicate_type}.`,
+                  },
+                ];
+          });
+          if (wrongKinds.length > 0)
             return server.delivery.toCallToolResult(
-              err(
-                new EvidenceIntegrityError(
-                  "Expected analyze_function Evidence",
-                ),
-              ),
+              err(new AnalysisInputError(contract.name, undefined, wrongKinds)),
               contract,
             );
           const leftIds = [leftEvidence.evidence_id];

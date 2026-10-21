@@ -3,6 +3,7 @@ import type { z } from "zod";
 import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import type { EvidenceBundle } from "../../domain/evidenceBundle.js";
 import { immutableEvidence, type Evidence } from "../../domain/evidence.js";
+import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
 import {
   EvidenceIntegrityError,
   EvidenceReferenceError,
@@ -29,6 +30,21 @@ const reference = (evidence_id: string) => ({
   kind: "retained-evidence" as const,
   evidence_id,
 });
+
+/** Name the request field whose inline Evidence failed to parse, keeping the parser cause. */
+export const malformedInlineEvidence = (
+  operation: string,
+  path: readonly (string | number)[],
+  cause: unknown,
+): AnalysisInputError =>
+  new AnalysisInputError(operation, { cause }, [
+    {
+      path,
+      reason: "invalid_value",
+      message: cause instanceof Error ? cause.message : "Invalid Evidence",
+    },
+  ]);
+
 // IDs and links have authenticated ASCII digest syntax. Own these short strings
 // independently of the discarded bundle's potentially large JSON backing store.
 const ownId = (value: string): string =>
@@ -59,17 +75,27 @@ export const loadNativeMatchingBundleSources = async ({
   const records = new Map<string, Evidence>(),
     index = new Map<string, SourceEntry>();
   const rootIds: string[] = [];
-  for (const value of [
-    input.left,
-    input.right,
-    ...input.left_observations,
-    ...input.right_observations,
-  ]) {
+  const roots: (readonly [readonly (string | number)[], unknown])[] = [
+    [["left"], input.left],
+    [["right"], input.right],
+    ...input.left_observations.map(
+      (value, position) => [["left_observations", position], value] as const,
+    ),
+    ...input.right_observations.map(
+      (value, position) => [["right_observations", position], value] as const,
+    ),
+  ];
+  for (const [path, value] of roots) {
     const parsed = retainedEvidenceReferenceSchema.safeParse(value);
     if (parsed.success) rootIds.push(parsed.data.evidence_id);
     else {
       await admission.admit(value);
-      const record = immutableEvidence(value);
+      let record: Evidence;
+      try {
+        record = immutableEvidence(value);
+      } catch (cause: unknown) {
+        throw malformedInlineEvidence(admission.operation, path, cause);
+      }
       rootIds.push(record.evidence_id);
       records.set(record.evidence_id, record);
       index.set(record.evidence_id, { file: -1, links: record.evidence_links });

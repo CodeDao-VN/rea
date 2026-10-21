@@ -67,6 +67,14 @@ it(
     );
     expect(listed).toMatchObject({
       operation: "list_electron_targets",
+      environment: {
+        platform: "unknown",
+        architecture: "unknown",
+        isolation: "none",
+      },
+      limitations: expect.arrayContaining([
+        "Browser host platform and architecture were not observed.",
+      ]),
       normalized_result: {
         targets: [{ target_id: "electron-page" }],
       },

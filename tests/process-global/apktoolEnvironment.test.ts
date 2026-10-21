@@ -1,6 +1,7 @@
 import { afterEach, expect, it, onTestFinished, vi } from "vitest";
 
 import { ApktoolProvider } from "../../src/apktool/ApktoolProvider.js";
+import { projectAnalysisError } from "../../src/domain/analysisErrorProjection.js";
 import { runOwnedCommand } from "../../src/process/OwnedCommand.js";
 import type { ProviderProcessSnapshot } from "../../src/process/ProviderProcess.js";
 
@@ -42,6 +43,38 @@ it.skipIf(process.platform === "win32")(
     expect(
       lastSpawn()?.hostEnvironment?.REA_APKTOOL_TEST_INHERITED_VALUE,
     ).toBeUndefined();
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "keeps the version-probe diagnostics on a capability refusal",
+  async () => {
+    vi.stubEnv("REA_APKTOOL_COMMAND", "/fixture/apktool");
+    vi.mocked(runOwnedCommand).mockImplementationOnce(async (_, limits) => {
+      const snapshot = {
+        stdout: { text: "unrecognized version output\n" },
+        stderr: { text: "probe stderr\n" },
+      } as unknown as ProviderProcessSnapshot;
+      limits?.observeCompleted?.(snapshot);
+      return snapshot;
+    });
+    const provider = new ApktoolProvider();
+    onTestFinished(() => provider.close());
+    const result = await provider.execute({
+      operation: "inspect_apktool_client",
+      input: {},
+    });
+    if (result.ok) throw new Error("Expected a configuration refusal");
+    expect(projectAnalysisError(result.error)).toMatchObject({
+      code: "capability_unavailable",
+      details: {
+        diagnostics: {
+          selected_command: "/fixture/apktool",
+          stdout: "unrecognized version output\n",
+          stderr: "probe stderr\n",
+        },
+      },
+    });
   },
 );
 

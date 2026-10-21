@@ -885,7 +885,7 @@ export class AdbProvider {
   ): Promise<ProviderAvailability> {
     try {
       const selection = this.selection();
-      await inspectAdbClient(selection, signal);
+      await inspectAdbClient(selection, "inspect_adb_client", signal);
       return {
         status: "available",
         code: null,
@@ -1319,7 +1319,7 @@ export class AdbProvider {
     let identity: AdbClientIdentity;
     try {
       selection = this.selection();
-      identity = await inspectAdbClient(selection, signal);
+      identity = await inspectAdbClient(selection, request.operation, signal);
     } catch (cause) {
       if (cause instanceof AnalysisError) return err(cause);
       if (cause instanceof AdbConfigurationFailure)

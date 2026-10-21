@@ -1038,6 +1038,15 @@ export class JavaScriptAnalysisWorker {
         response.message,
         { ...this.#limits(), ...response.limits },
       );
+    if (response.reason === "io")
+      return new ProviderAdapterError(PROVIDER, OPERATION, {
+        capturedOutput: this.#captured(),
+        diagnostics: {
+          source_path: path,
+          phase,
+          io_message: response.message,
+        },
+      });
     return new AnalysisOutputError(
       OPERATION,
       `${path} during ${phase}: ${response.message}`,

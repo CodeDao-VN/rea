@@ -60,6 +60,7 @@ export const readJsonFile = async (
 > =>
   readJsonFileInput(
     path,
+    "read_evidence_file",
     (selected) =>
       readJsonInputFile(selected, "read_evidence_file", signal, resources),
     signal,
@@ -68,6 +69,7 @@ export const readJsonFile = async (
 /** Read selected JSON members through the same regular-file error boundary. */
 export const readJsonObjectMembersFile = (
   path: string,
+  operation: string,
   scans: readonly ReadonlyMap<string, JsonObjectMemberReader>[],
   signal?: AbortSignal,
   resources?: ArtifactResourceScope,
@@ -79,19 +81,15 @@ export const readJsonObjectMembersFile = (
 > =>
   readJsonFileInput(
     path,
+    operation,
     (selected) =>
-      readJsonObjectFile(
-        selected,
-        "read_evidence_file",
-        scans,
-        signal,
-        resources,
-      ),
+      readJsonObjectFile(selected, operation, scans, signal, resources),
     signal,
   );
 
 const readJsonFileInput = async <Value>(
   path: string,
+  operation: string,
   read: (
     selected: string,
   ) => Promise<
@@ -131,7 +129,7 @@ const readJsonFileInput = async <Value>(
     if (cause instanceof AnalysisResourceConstraintError) return err(cause);
     if (cause instanceof JsonInputCancellationFailure)
       return err(
-        new AnalysisCancelledError("read_evidence_file", {
+        new AnalysisCancelledError(operation, {
           cause: cause.reason,
         }),
       );
@@ -144,7 +142,7 @@ const readJsonFileInput = async <Value>(
       );
     if (isJsonReadCancellation(cause, signal))
       return err(
-        new AnalysisCancelledError("read_evidence_file", {
+        new AnalysisCancelledError(operation, {
           cause: signal?.reason,
         }),
       );

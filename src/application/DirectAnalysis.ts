@@ -274,6 +274,7 @@ const runAnalysis = async (
       }
       const prepared = await prepareSnapshot({
         path,
+        operation: tool,
         snapshotPath,
         signal,
         ...(options.formatHint === undefined
@@ -564,6 +565,7 @@ const withProcessCancellation = async <Value>(
 
 const prepareSnapshot = async (options: {
   readonly path: string;
+  readonly operation: string;
   readonly formatHint?: ExecutableFormatHint;
   readonly architecture?: BinaryArchitecture;
   readonly entryPoint?: string;
@@ -578,7 +580,12 @@ const prepareSnapshot = async (options: {
   const { path, snapshotPath } = options;
   if (snapshotPath === undefined || !(await fileExists(snapshotPath)))
     return ok({});
-  const loaded = await readAnalysisSnapshot(snapshotPath, options.signal);
+  const loaded = await readAnalysisSnapshot(
+    snapshotPath,
+    options.signal,
+    undefined,
+    options.operation,
+  );
   if (!loaded.ok) return loaded;
   const target = await parseBinaryTarget(path, {
     signal: options.signal,

@@ -1,5 +1,8 @@
 import { NativeMatchingAdmission } from "./NativeMatchingAdmission.js";
-import { loadNativeMatchingBundleSources } from "./NativeMatchingBundleSources.js";
+import {
+  loadNativeMatchingBundleSources,
+  malformedInlineEvidence,
+} from "./NativeMatchingBundleSources.js";
 import { RegularFileCleanupFailure } from "../RegularFileRead.js";
 import { matchFunctionInventories } from "../../domain/native/matchFunctionInventories.js";
 import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
@@ -62,7 +65,10 @@ const matchWithAdmission = async (
         analysisInputErrorFromIssues(OPERATION, parsed.error.issues, rawInput),
       );
     const sources = new Map<string, Evidence>();
-    const resolve = async (input: unknown): Promise<Evidence> => {
+    const resolve = async (
+      input: unknown,
+      path: readonly (string | number)[] = [],
+    ): Promise<Evidence> => {
       const reference = retainedEvidenceReferenceSchema.safeParse(input);
       let raw = input;
       if (reference.success) {
@@ -71,19 +77,27 @@ const matchWithAdmission = async (
         raw = found.value;
       }
       await admission.admit(raw);
-      const evidence = parseEvidence(raw);
+      let evidence: Evidence;
+      try {
+        evidence = parseEvidence(raw);
+      } catch (cause: unknown) {
+        throw malformedInlineEvidence(OPERATION, path, cause);
+      }
       const cached = sources.get(evidence.evidence_id);
       if (cached !== undefined) return cached;
       sources.set(evidence.evidence_id, evidence);
       return evidence;
     };
-    const left = await resolve(parsed.data.left),
-      right = await resolve(parsed.data.right);
-    const observations = async (inputs: readonly unknown[]) => {
+    const left = await resolve(parsed.data.left, ["left"]),
+      right = await resolve(parsed.data.right, ["right"]);
+    const observations = async (
+      field: "left_observations" | "right_observations",
+      inputs: readonly unknown[],
+    ) => {
       const result: Evidence[] = [];
       const seen = new Set<string>();
-      for (const input of inputs) {
-        const record = await resolve(input);
+      for (const [index, input] of inputs.entries()) {
+        const record = await resolve(input, [field, index]);
         if (!seen.has(record.evidence_id)) {
           seen.add(record.evidence_id);
           result.push(record);
@@ -91,8 +105,12 @@ const matchWithAdmission = async (
       }
       return result;
     };
-    const leftObservations = await observations(parsed.data.left_observations);
+    const leftObservations = await observations(
+      "left_observations",
+      parsed.data.left_observations,
+    );
     const rightObservations = await observations(
+      "right_observations",
       parsed.data.right_observations,
     );
     const directLinks = [...sources.keys()].sort();

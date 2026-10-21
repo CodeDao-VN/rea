@@ -162,6 +162,7 @@ test.each([null, "caller stopped", new Error("caller stopped")] as const)(
     controller.abort(reason);
     const error: unknown = await inspectAdbClient(
       { binary: "/must-not-start", pathSource: "environment" },
+      "inspect_adb_client",
       controller.signal,
     ).catch((cause: unknown) => cause);
     expect(error).toMatchObject({
@@ -207,6 +208,7 @@ nativeClientTest(
     hooks.afterCommand = () => controller.abort(null);
     const error: unknown = await inspectAdbClient(
       { binary: join(root, "missing"), pathSource: "environment" },
+      "inspect_adb_client",
       controller.signal,
     ).catch((cause: unknown) => cause);
     expect(error).toMatchObject({
@@ -262,6 +264,7 @@ nativeClientTest(
     hooks.afterCommand = () => controller.abort(null);
     const error: unknown = await inspectAdbClient(
       selection,
+      "inspect_adb_client",
       controller.signal,
     ).catch((cause: unknown) => cause);
     expect(error).toMatchObject({ code: "version_unresolved" });

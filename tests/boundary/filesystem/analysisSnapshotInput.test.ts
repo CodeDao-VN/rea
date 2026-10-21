@@ -16,6 +16,25 @@ import {
 import { createEvidenceBundle } from "../../../src/domain/evidenceBundle.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
+it("attributes a cancelled snapshot read to the requesting operation", async () => {
+  const root = await createTestTempDirectory("rea-snapshot-cancel-");
+  const path = join(root, "snapshot.json");
+  await writeFile(path, "{}");
+  const controller = new AbortController();
+  controller.abort(new Error("stop"));
+  const loaded = await readAnalysisSnapshot(
+    path,
+    controller.signal,
+    undefined,
+    "open_binary",
+  );
+  if (loaded.ok) throw new Error("Expected cancellation");
+  expect(loaded.error).toMatchObject({
+    _tag: "AnalysisCancelledError",
+    operation: "open_binary",
+  });
+});
+
 describe.each([
   { mode: "native", paddingBytes: 0 },
   { mode: "streamed", paddingBytes: 9 * 1024 * 1024 },

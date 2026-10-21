@@ -54,6 +54,19 @@ it("reads a negative 32-bit integer", () => {
   expect(parsed.value).toEqual([["n", [0, -1, 1]]]);
 });
 
+it("classifies negative marshal sizes as malformed structure, not resource limits", () => {
+  for (const hex of ["73ffffffff", "5bffffffff"]) {
+    const parsed = readMarshalSubset(bytes(hex));
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) continue;
+    expect(parsed.error.reason).toBe("format");
+  }
+  const oversized = readMarshalSubset(bytes("7301000100"));
+  expect(oversized.ok).toBe(false);
+  if (oversized.ok) return;
+  expect(oversized.error.reason).toBe("limit");
+});
+
 it("rejects a marshal type outside the subset", () => {
   const parsed = readMarshalSubset(Buffer.from([0x4e]));
   expect(parsed.ok).toBe(false);
