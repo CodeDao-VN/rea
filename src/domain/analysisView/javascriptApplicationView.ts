@@ -218,17 +218,23 @@ const javascriptCoverageUnknowns = (
   return unknowns;
 };
 
-const parentFields = (
+const javascriptApplicationLimitations = (
   parent: AnalysisViewParent,
   analysis: JavaScriptApplicationAnalysisResult,
-  sourceCoverage: JavaScriptApplicationSourceCoverage,
-) => {
-  const limitations = uniqueSorted([
+): string[] =>
+  uniqueSorted([
     ...parent.limitations,
     ...analysis.limitations,
     ...analysis.graph.limitations,
     ...analysis.semantic_graph.limitations,
   ]);
+
+const parentFields = (
+  parent: AnalysisViewParent,
+  analysis: JavaScriptApplicationAnalysisResult,
+  sourceCoverage: JavaScriptApplicationSourceCoverage,
+) => {
+  const limitations = javascriptApplicationLimitations(parent, analysis);
   return {
     parent_evidence_id: parent.evidenceId,
     parent_operation: "analyze_javascript_application" as const,
@@ -386,7 +392,7 @@ export const projectJavaScriptApplicationView = (
           application_unknowns: sourceCoverage.application_unknown_count,
           semantic_unknowns: sourceCoverage.semantic_unknown_count,
         }),
-        limitation_count: shared.limitations.length,
+        limitation_count: javascriptApplicationLimitations(parent, analysis).length,
       },
       coverage: completeCoverage(moduleCount, moduleCount),
       ...shared,
