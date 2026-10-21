@@ -522,21 +522,22 @@ it("counts all JavaScript summary limitations when the message budget truncates 
     ...semantic,
     limitations: [],
   });
+  const boundedAnalysis = {
+    ...analysis,
+    limitations: messages,
+    graph: { ...analysis.graph, limitations: [] },
+    semantic_graph: semanticGraph,
+  };
   const parent = {
-    ...javascriptParent({
-      ...analysis,
-      limitations: messages,
-      graph: { ...analysis.graph, limitations: [] },
-      semantic_graph: semanticGraph,
-    }),
+    ...javascriptParent(boundedAnalysis),
     limitations: [],
   };
   const expectedLimitations = [
     ...new Set([
       ...parent.limitations,
-      ...analysis.limitations,
-      ...analysis.graph.limitations,
-      ...analysis.semantic_graph.limitations,
+      ...boundedAnalysis.limitations,
+      ...boundedAnalysis.graph.limitations,
+      ...boundedAnalysis.semantic_graph.limitations,
     ]),
   ].sort();
 
