@@ -55,6 +55,20 @@ describe("Electron file scope", () => {
     ).toBeUndefined();
   });
 
+  it.skipIf(process.platform === "win32")(
+    "refuses an encoded backslash that names an existing POSIX file",
+    async () => {
+      const root = await createTestTempDirectory("rea-electron-encoded-path-");
+      // POSIX file names may contain a backslash, which fileURLToPath decodes.
+      await writeFile(join(root, "page\\index.html"), "denied");
+      expect(
+        await authorizedElectronFile(
+          `${pathToFileURL(root).href}/page%5Cindex.html`,
+        ),
+      ).toBeUndefined();
+    },
+  );
+
   it("resolves regular files Electron serves from inside an ASAR archive", async () => {
     const root = await createTestTempDirectory("rea-electron-asar-scope-");
     const source = join(root, "source");

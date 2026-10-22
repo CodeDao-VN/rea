@@ -120,7 +120,6 @@ const resolveAuthorizedElectronFile = async (
   asarHeaderAdmission: AsarHeaderAdmission,
 ): Promise<string | undefined> => {
   throwIfAborted(signal);
-  if (/%(?:2f|5c)/iu.test(value)) return undefined;
   let url: URL;
   try {
     url = new URL(value);
@@ -136,6 +135,8 @@ const resolveAuthorizedElectronFile = async (
     url.password !== ""
   )
     return undefined;
+  // Only the path selects the file; a query or fragment may encode separators.
+  if (/%(?:2f|5c)/iu.test(url.pathname)) return undefined;
   let path: string;
   try {
     path = fileURLToPath(url);

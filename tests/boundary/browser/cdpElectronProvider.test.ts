@@ -252,6 +252,48 @@ describe("CdpElectronProvider target selection", () => {
   });
 });
 
+describe("CdpElectronProvider URL suffixes", () => {
+  it.each([
+    "?next=%2Fsettings",
+    "?next=%5Csettings",
+    "#%2Fsettings",
+    "#%5Csettings",
+  ])(
+    "lists and inspects a local file page whose %s suffix encodes a separator",
+    async (suffix) => {
+      const root = await electronFixture();
+      const index = join(root, "index.html");
+      const browser = await startFakeCdpBrowser({
+        electronFileUrl: `${pathToFileURL(index).href}${suffix}`,
+      });
+      browsers.push(browser);
+      const provider = new CdpElectronProvider();
+      const listed = await provider.listTargets(
+        listElectronTargetsInputSchema.parse({
+          cdp_endpoint: browser.endpoint,
+        }),
+      );
+      if (!listed.ok) throw listed.error;
+      expect(listed.value.targets).toEqual([
+        expect.objectContaining({
+          target_id: "electron-page",
+          file_path: index,
+        }),
+      ]);
+
+      const inspected = await provider.inspectPage(
+        inspectElectronPageInputSchema.parse({
+          cdp_endpoint: browser.endpoint,
+          target_id: "electron-page",
+          observation_ms: 0,
+        }),
+      );
+      if (!inspected.ok) throw inspected.error;
+      expect(inspected.value.target.file_path).toBe(index);
+    },
+  );
+});
+
 describe("CdpElectronProvider packaged pages", () => {
   it("lists and inspects packaged pages served from inside app.asar", async () => {
     const root = await createTestTempDirectory("rea-electron-asar-provider-");
