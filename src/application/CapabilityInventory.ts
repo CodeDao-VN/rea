@@ -59,6 +59,8 @@ export type AvailabilityPolicy = {
   /** Fresh owner observation of the selected required EVM limiter. */
   readonly evmLimiterAvailability?: ProviderAvailability;
   readonly processCaptureEnabled: boolean;
+  /** False when this host cannot enforce the native bound capture summaries need. */
+  readonly pcapCaptureHostSupported?: boolean;
   readonly optionalProviderLoadFailures?: OptionalProviderLoadFailures;
   readonly binaryLayoutEnabled?: boolean;
   readonly recordedCrashEnabled?: boolean;
@@ -588,6 +590,15 @@ const workflowAvailabilityFor = ({
       remediation: "Run process capture on a supported Linux or macOS host.",
     };
   if (kind === "application") return { reason: "available", remediation: null };
+  if (
+    name === "inspect_pcap_capture" &&
+    policy.pcapCaptureHostSupported === false
+  )
+    return {
+      reason: "unsupported_host",
+      remediation:
+        "Run capture summaries on Linux with util-linux prlimit or on Windows, where REA can enforce their native memory bound. inspect_pcap_client still reports the selected tools.",
+    };
   if (kind === "pcap-provider" || kind === "flutter-provider")
     return { reason: "available", remediation: null };
   const electron = electronProviderAvailability(name, kind, policy);

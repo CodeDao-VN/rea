@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { isAbsolute } from "node:path";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import { AnalysisCapabilityUnavailableError } from "../domain/analysisErrorCore.js";
+import { pcapCaptureHostSupported } from "../domain/pcap/pcapAnalysis.js";
 import type { ArtifactAnalysisResources } from "../process/ArtifactAnalysisResources.js";
 import type { runPcapCommand } from "./PcapCommand.js";
 
@@ -24,7 +25,7 @@ export const preparePcapNativeBound = async (
       ],
     };
   }
-  if (process.platform !== "linux") {
+  if (!pcapCaptureHostSupported(process.platform)) {
     const reason =
       "Packet summaries require an enforceable native memory bound: Linux with util-linux prlimit, or Windows with owned Job Objects. This host's capture boundary remains unsupported.";
     throw new AnalysisCapabilityUnavailableError(

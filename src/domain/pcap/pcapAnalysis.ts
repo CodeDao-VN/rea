@@ -3,6 +3,13 @@ import { localPathStringSchema } from "../localPath.js";
 import { digestSchema } from "../digests.js";
 
 /**
+ * Whether this host can enforce the native memory bound that capture summaries
+ * require: util-linux prlimit on Linux or owned Job Objects on Windows.
+ */
+export const pcapCaptureHostSupported = (platform: NodeJS.Platform): boolean =>
+  platform === "linux" || platform === "win32";
+
+/**
  * Caller intent for packet-capture analysis through caller-supplied tshark
  * and capinfos. REA never installs Wireshark or its tools.
  */

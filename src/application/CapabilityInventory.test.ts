@@ -762,3 +762,35 @@ describe("trace_feature requirements", () => {
     ).toMatchObject({ available: false, reason: "provider_missing" });
   });
 });
+
+describe("pcap capture host availability (#5711)", () => {
+  const input = { open: false, capabilities: [] };
+  const pcapTools = (pcapCaptureHostSupported?: boolean) =>
+    Object.fromEntries(
+      buildCapabilityInventory(input, {
+        processCaptureEnabled: true,
+        ...(pcapCaptureHostSupported === undefined
+          ? {}
+          : { pcapCaptureHostSupported }),
+      })
+        .filter(({ name }) => name.startsWith("inspect_pcap_"))
+        .map(({ name, available, reason }) => [name, { available, reason }]),
+    );
+
+  it("reports capture summaries unsupported where the native bound is unavailable", () => {
+    expect(pcapTools(false)).toEqual({
+      inspect_pcap_client: { available: true, reason: "available" },
+      inspect_pcap_capture: { available: false, reason: "unsupported_host" },
+    });
+  });
+
+  it.each([true, undefined])(
+    "keeps both pcap tools available when host support is %s",
+    (supported) => {
+      expect(pcapTools(supported)).toEqual({
+        inspect_pcap_client: { available: true, reason: "available" },
+        inspect_pcap_capture: { available: true, reason: "available" },
+      });
+    },
+  );
+});

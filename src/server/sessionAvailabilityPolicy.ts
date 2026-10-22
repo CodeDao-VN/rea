@@ -1,6 +1,7 @@
 import type { AvailabilityPolicy } from "../application/CapabilityInventory.js";
 import type { OptionalProviderLoadFailures } from "../application/OptionalObservationProviders.js";
 import { platform } from "node:process";
+import { pcapCaptureHostSupported } from "../domain/pcap/pcapAnalysis.js";
 
 export interface SessionAvailabilityDefaults {
   readonly optionalProviderLoadFailures?:
@@ -43,6 +44,7 @@ export const sessionAvailabilityPolicy = (
       evmInterfaceEnabled:
         defaults.optionalFeatures?.evmInterfaceEnabled ?? false,
       processCaptureEnabled: platform !== "win32",
+      pcapCaptureHostSupported: pcapCaptureHostSupported(platform),
       recordedCrashEnabled:
         defaults.optionalFeatures?.recordedCrashEnabled ?? false,
       binaryLayoutEnabled:
