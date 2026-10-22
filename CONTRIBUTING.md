@@ -239,6 +239,14 @@ MinGW-w64, and `tar`; the build script does not run on Windows. See that guide
 for the build and artifact-verification commands and the separate real Windows
 verification prerequisites. Keep the generated addon and manifest uncommitted.
 
+Separately from the missing native addon, the general source suite
+(`npm run test:fast`, `test:changed`, `test:local`) is not expected to pass
+from a Windows checkout: CI runs that suite on Linux, while Windows CI runs
+only a curated lane. Some source tests rely on POSIX fixture paths,
+`#!/bin/sh` tool stubs, or POSIX rename semantics, and fail on Windows
+regardless of your change. Compare failures against the base revision, or run
+the suite on Linux or WSL, before attributing them to a change.
+
 ## Documentation website
 
 The VitePress site uses the Markdown files in `docs/`. Run `npm run docs:dev`
