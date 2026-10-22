@@ -15,6 +15,13 @@ const registerOwnedRizinCommandOutcomeTests = (options: {
   it.each([
     ["normal exit", providerSnapshot(), "complete", 0, false],
     [
+      "normal exit with omitted output",
+      providerSnapshot({ diagnosticTruncated: true }),
+      "complete",
+      0,
+      true,
+    ],
+    [
       "non-zero exit",
       providerSnapshot({ exitCode: 7, diagnosticTruncated: true }),
       "complete",
@@ -99,6 +106,11 @@ const registerOwnedRizinCommandOutcomeTests = (options: {
           },
         });
         if (!result.ok) throw new Error("Expected provider Evidence");
+        expect(
+          result.value.limitations
+            .join("\n")
+            .includes("ended before completion"),
+        ).toBe(completion === "unknown" && outputTruncated);
         expect(result.value.parameters).toMatchObject({
           command: "iI",
           provider_executable: "rizin-test",

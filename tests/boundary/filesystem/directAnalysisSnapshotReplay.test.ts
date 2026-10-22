@@ -912,6 +912,39 @@ describe("snapshot replay provider identity", () => {
     expect(fixture.starts).toEqual(startsAfterFirst);
     expect(fixture.calls).toEqual(callsAfterFirst);
   });
+
+  it("names the target mismatch when a snapshot is replayed against other bytes", async () => {
+    const fixture = await createSnapshotReplayFixture("rea-target-mismatch-");
+    const provider = fixture.createProvider({
+      supportedOperations: ["search_strings"],
+    });
+    const request = { pattern: "fixture", document: "fixture" };
+    await runDirectAnalysis(
+      fixture.dependencies(provider),
+      fixture.path,
+      "search_strings",
+      request,
+      { snapshotPath: fixture.snapshotPath },
+    );
+
+    const otherPath = join(dirname(fixture.path), "other.hop");
+    await writeFile(otherPath, "other fixture");
+    const mismatch = await runDirectAnalysis(
+      fixture.dependencies(provider),
+      otherPath,
+      "search_strings",
+      request,
+      { snapshotPath: fixture.snapshotPath },
+    );
+    expect(mismatch).toMatchObject({
+      code: "evidence_integrity_mismatch",
+      message: "Analysis snapshot target does not match the requested binary",
+      remediation: {
+        action:
+          "Run analysis without this snapshot, then save a fresh snapshot using the intended artifact, provider, and analysis profile.",
+      },
+    });
+  });
 });
 
 const assertEvidenceSurvivesSnapshotSaveFailure = async (): Promise<void> => {
