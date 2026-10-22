@@ -342,7 +342,11 @@ export class RizinDebugSessionManager {
     >
   > {
     if (signal?.aborted)
-      return err(new AnalysisCancelledError("start_rizin_debug_session"));
+      return err(
+        new AnalysisCancelledError("start_rizin_debug_session", {
+          cause: signal.reason,
+        }),
+      );
     if (this.#platform !== "linux")
       return err(
         new AnalysisCapabilityUnavailableError(
@@ -382,7 +386,11 @@ export class RizinDebugSessionManager {
     // TTY identity validation is asynchronous. Cancellation may arrive while
     // realpath/open/stat are pending, and must prevent the debugger spawn.
     if (signal?.aborted)
-      return err(new AnalysisCancelledError("start_rizin_debug_session"));
+      return err(
+        new AnalysisCancelledError("start_rizin_debug_session", {
+          cause: signal.reason,
+        }),
+      );
     const id = randomUUID();
     const resolvedPath = absoluteCallerPath(input.path);
     const launchProvenance: RizinLaunchProvenance = {
@@ -415,7 +423,9 @@ export class RizinDebugSessionManager {
     } catch (cause) {
       if (signal?.aborted)
         return err(
-          new AnalysisCancelledError("start_rizin_debug_session", { cause }),
+          new AnalysisCancelledError("start_rizin_debug_session", {
+            cause: signal.reason,
+          }),
         );
       return err(
         new AnalysisCapabilityUnavailableError(
@@ -505,7 +515,9 @@ export class RizinDebugSessionManager {
       // initial frame run before publishing the session as ready.
       await new Promise<void>((resolve) => setImmediate(resolve));
       if (signal?.aborted)
-        throw new AnalysisCancelledError("start_rizin_debug_session");
+        throw new AnalysisCancelledError("start_rizin_debug_session", {
+          cause: signal.reason,
+        });
       if (session.exited)
         throw new RizinProcessExitError("Rizin exited during startup.");
       if (session.protocolError !== undefined)
@@ -528,7 +540,7 @@ export class RizinDebugSessionManager {
       if (signal?.aborted || cause instanceof AnalysisCancelledError)
         return err(
           new AnalysisCancelledError("start_rizin_debug_session", {
-            cause,
+            cause: signal?.aborted ? signal.reason : cause,
             capturedOutput,
           }),
         );
@@ -592,7 +604,11 @@ export class RizinDebugSessionManager {
     )
       return err(new AnalysisInputError("rizin_debug_command"));
     if (signal?.aborted)
-      return err(new AnalysisCancelledError("rizin_debug_command"));
+      return err(
+        new AnalysisCancelledError("rizin_debug_command", {
+          cause: signal.reason,
+        }),
+      );
     if (session.pendingCommandCount >= MAX_PENDING_COMMANDS)
       return err(
         new AnalysisResourceConstraintError(
@@ -636,7 +652,11 @@ export class RizinDebugSessionManager {
       await waitForTurn(previous, signal);
       acquired = true;
       if (signal?.aborted)
-        return err(new AnalysisCancelledError("rizin_debug_command"));
+        return err(
+          new AnalysisCancelledError("rizin_debug_command", {
+            cause: signal.reason,
+          }),
+        );
       if (
         !session.ready ||
         session.exited ||
@@ -705,7 +725,9 @@ export class RizinDebugSessionManager {
       }
       const captured = received.value;
       if (signal?.aborted)
-        throw new AnalysisCancelledError("rizin_debug_command");
+        throw new AnalysisCancelledError("rizin_debug_command", {
+          cause: signal.reason,
+        });
       let cleanupFailure: string | undefined;
       if (captured.outputTruncated) {
         // Stryker disable next-line BooleanLiteral -- `waitForCommandFrames` sets `protocolError` before reporting truncation; both detach wrappers therefore fail closed before a queued command can be awaited, so the held-tail flag cannot change this public path.
@@ -778,9 +800,12 @@ export class RizinDebugSessionManager {
               limitations,
             });
       if (signal?.aborted || cause instanceof AnalysisCancelledError) {
+        const cancellationCause = signal?.aborted ? signal.reason : cause;
         if (!commandSent)
           return err(
-            new AnalysisCancelledError("rizin_debug_command", { cause }),
+            new AnalysisCancelledError("rizin_debug_command", {
+              cause: cancellationCause,
+            }),
           );
         const evidence = partialEvidence([
           "The Rizin command was cancelled; collected frame output is partial and command completion is unknown.",
@@ -798,7 +823,7 @@ export class RizinDebugSessionManager {
               stopped.reason,
               {
                 cause: new AnalysisCancelledError("rizin_debug_command", {
-                  cause,
+                  cause: cancellationCause,
                   ...(capturedOutput === undefined ? {} : { capturedOutput }),
                 }),
                 ...(evidence === undefined
@@ -809,7 +834,7 @@ export class RizinDebugSessionManager {
           );
         return err(
           new AnalysisCancelledError("rizin_debug_command", {
-            cause,
+            cause: cancellationCause,
             ...(capturedOutput === undefined ? {} : { capturedOutput }),
             ...(evidence === undefined ? {} : { partialObservation: evidence }),
           }),
@@ -1620,7 +1645,11 @@ const waitForFrame = (
   signal?: AbortSignal,
 ): Promise<RizinFrame> => {
   if (signal?.aborted)
-    return Promise.reject(new AnalysisCancelledError("rizin_debug_command"));
+    return Promise.reject(
+      new AnalysisCancelledError("rizin_debug_command", {
+        cause: signal.reason,
+      }),
+    );
   const queued = session.frames.shift();
   if (queued !== undefined) {
     session.queuedFrameBytes -= queued.queueChargeBytes;
@@ -1637,7 +1666,11 @@ const waitForFrame = (
     };
     const onAbort = (): void => {
       cleanup();
-      reject(new AnalysisCancelledError("rizin_debug_command"));
+      reject(
+        new AnalysisCancelledError("rizin_debug_command", {
+          cause: signal?.reason,
+        }),
+      );
     };
     const timer = setTimeout(() => {
       cleanup();
@@ -1665,10 +1698,18 @@ const waitForTurn = (
 ): Promise<void> => {
   if (signal === undefined) return previous;
   if (signal.aborted)
-    return Promise.reject(new AnalysisCancelledError("rizin_debug_command"));
+    return Promise.reject(
+      new AnalysisCancelledError("rizin_debug_command", {
+        cause: signal.reason,
+      }),
+    );
   return new Promise<void>((resolve, reject) => {
     const onAbort = (): void =>
-      reject(new AnalysisCancelledError("rizin_debug_command"));
+      reject(
+        new AnalysisCancelledError("rizin_debug_command", {
+          cause: signal.reason,
+        }),
+      );
     signal.addEventListener("abort", onAbort, { once: true });
     previous.then(() => {
       signal.removeEventListener("abort", onAbort);

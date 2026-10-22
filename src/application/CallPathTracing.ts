@@ -95,14 +95,20 @@ export const traceCallPath = async (
     direction: input.direction,
   };
   if (isAborted(signal))
-    return err(new AnalysisCancelledError("trace_call_path"));
+    return err(
+      new AnalysisCancelledError("trace_call_path", { cause: signal?.reason }),
+    );
   const state = createTraceState(resolvedInput);
   while (
     state.queueIndex < state.queue.length &&
     state.traversalPath.length === 0
   ) {
     if (isAborted(signal))
-      return err(new AnalysisCancelledError("trace_call_path"));
+      return err(
+        new AnalysisCancelledError("trace_call_path", {
+          cause: signal?.reason,
+        }),
+      );
     const address = state.queue[state.queueIndex++];
     if (address === undefined) break;
     const current = state.visited.get(address);
@@ -118,7 +124,9 @@ export const traceCallPath = async (
     if (expanded.value) break;
   }
   if (isAborted(signal))
-    return err(new AnalysisCancelledError("trace_call_path"));
+    return err(
+      new AnalysisCancelledError("trace_call_path", { cause: signal?.reason }),
+    );
   return ok(projectTrace(resolvedInput, state));
 };
 
@@ -150,7 +158,9 @@ const expandAddress = async (
       return result;
   }
   if (isAborted(signal))
-    return err(new AnalysisCancelledError("trace_call_path"));
+    return err(
+      new AnalysisCancelledError("trace_call_path", { cause: signal?.reason }),
+    );
   if (!result.ok) {
     state.failures.push({
       address,

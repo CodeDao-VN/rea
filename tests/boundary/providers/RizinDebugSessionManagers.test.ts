@@ -160,6 +160,57 @@ process.stdin.on("data", (chunk) => {
 );
 
 it.skipIf(process.platform === "win32")(
+  "keeps the caller abort reason on refused start and in-flight command cancellation",
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rea-rizin-cancel-"));
+    const provider = join(directory, "silent-rizin.mjs");
+    const manager = createRizinTestManager({ REA_RIZIN_COMMAND: provider });
+    try {
+      await writeFile(
+        provider,
+        `#!/usr/bin/env node
+process.stdout.write("\\0");
+process.stdin.resume();
+`,
+      );
+      await chmod(provider, 0o700);
+      const inferiorTty = await rizinTestInferiorTty();
+
+      const startReason = { reason: "before start" };
+      const startAbort = new AbortController();
+      startAbort.abort(startReason);
+      const refused = await manager.start(
+        { path: "-target.bin", inferior_tty: inferiorTty },
+        startAbort.signal,
+      );
+      if (refused.ok) throw new Error("expected start cancellation");
+      expect(refused.error.cause).toBe(startReason);
+
+      const started = await manager.start({
+        path: "-target.bin",
+        inferior_tty: inferiorTty,
+      });
+      if (!started.ok) throw started.error;
+      const commandReason = { reason: "during command" };
+      const command = new AbortController();
+      const pending = manager.execute(
+        started.value.session_id,
+        "dr",
+        command.signal,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      command.abort(commandReason);
+      const result = await pending;
+      if (result.ok) throw new Error("expected command cancellation");
+      expect(result.error.cause).toBe(commandReason);
+    } finally {
+      await manager.closeAll().catch(() => undefined);
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+it.skipIf(process.platform === "win32")(
   "stops Rizin when empty unsolicited NUL frames exhaust the bounded queue",
   async () => {
     const directory = await mkdtemp(join(tmpdir(), "rea-rizin-empty-frames-"));

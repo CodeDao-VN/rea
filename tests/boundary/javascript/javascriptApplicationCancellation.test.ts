@@ -10,6 +10,7 @@ import {
 import { analyzeJavaScriptApplication as analyzeOwnedApplication } from "../../../src/application/javascript/JavaScriptApplicationService.js";
 import { javascriptApplicationAnalysisResultSchema } from "../../../src/domain/javascript/javascriptApplicationAnalysis.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { ArtifactReaderFailure } from "../../../src/artifacts/ArtifactReader.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
 import { analyzeJavaScriptApplication } from "../../support/javascriptApplicationScope.js";
 
@@ -390,18 +391,23 @@ it("honors cancellation observed during the terminal publication race", async ()
   const root = await createTestTempDirectory("rea-js-cancel-terminal-");
   await writeFile(join(root, "main.js"), "export const value = 1;\n");
   const controller = new AbortController();
+  const reason = { reason: "stop during terminal publication" };
   const result = await analyzeJavaScriptApplication(
     { input_path: root, format: "directory" },
     {
       signal: controller.signal,
       progress: {
         async report(event) {
-          if (event.terminal) controller.abort();
+          if (event.terminal) controller.abort(reason);
         },
       },
     },
   );
   if (result.ok) throw new Error("Expected cancellation before admission");
+  expect(result.error.cause).toBeInstanceOf(ArtifactReaderFailure);
+  expect(
+    (result.error.cause as ArtifactReaderFailure).cancellation?.reason,
+  ).toBe(reason);
   const failure = projectAnalysisError(result.error);
   expect(failure).toMatchObject({
     details: { reason: "cancelled" },

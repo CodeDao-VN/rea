@@ -730,6 +730,8 @@ const runOwnedArtifactOutcome = async (
   if (mode === "success" && result.ok)
     assertGlueObservations(result.value.result, glueInputs, path);
   assertModeOutcome(mode, result, path);
+  if (mode === "cancelled" && !result.ok)
+    expect(result.error.cause).toBe(controller.signal.reason);
   if (mode === "cleanup") {
     await assertCleanupRecovery({
       provider,

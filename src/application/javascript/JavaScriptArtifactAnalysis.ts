@@ -153,13 +153,16 @@ export const analyzeAndAdoptJavaScriptArtifactFiles = async (
         if (signal?.aborted === true) {
           interruption = new AnalysisCancelledError(
             "analyze_javascript_application",
+            { cause: signal.reason },
           );
           break;
         }
         continue;
       }
       if (signal?.aborted === true)
-        throw new AnalysisCancelledError("analyze_javascript_application");
+        throw new AnalysisCancelledError("analyze_javascript_application", {
+          cause: signal.reason,
+        });
       await beforeFile(file, selectedFileIndex++, selectedFileCount);
       analysisStarted = true;
       if (file.kind !== "javascript" || !file.text.included) {
@@ -249,7 +252,9 @@ export const analyzeAndAdoptJavaScriptArtifactFiles = async (
         throw cause;
       interruption =
         signal?.aborted === true
-          ? new AnalysisCancelledError("analyze_javascript_application")
+          ? new AnalysisCancelledError("analyze_javascript_application", {
+              cause: signal.reason,
+            })
           : cause instanceof AnalysisError
             ? cause
             : null;

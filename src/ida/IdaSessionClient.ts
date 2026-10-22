@@ -205,7 +205,11 @@ export class IdaSessionClient implements AnalysisClient {
     const call = this.#tail.then(() => {
       if (!this.#ready || this.#closed || this.#closing) return undefined;
       if (wasCancelled(options))
-        return err(new AnalysisCancelledError(operation));
+        return err(
+          new AnalysisCancelledError(operation, {
+            cause: options?.signal?.reason,
+          }),
+        );
       return this.#execute(operation, parameters, options, true);
     });
     this.#tail = call.then(
@@ -214,7 +218,11 @@ export class IdaSessionClient implements AnalysisClient {
     );
     const result = await waitForAbortable(call, options?.signal);
     return result === ABORTED
-      ? err(new AnalysisCancelledError(operation))
+      ? err(
+          new AnalysisCancelledError(operation, {
+            cause: options?.signal?.reason,
+          }),
+        )
       : result;
   }
 
@@ -231,7 +239,11 @@ export class IdaSessionClient implements AnalysisClient {
         ),
       );
     if (wasCancelled(options))
-      return err(new AnalysisCancelledError(operation));
+      return err(
+        new AnalysisCancelledError(operation, {
+          cause: options?.signal?.reason,
+        }),
+      );
     if (operation !== "health" && !isIdaOperation(operation))
       return err(
         new AnalysisCapabilityUnavailableError(
@@ -297,7 +309,10 @@ export class IdaSessionClient implements AnalysisClient {
       if (!readyOnly) await this.#start(operation);
       const before = await this.#observe(options);
       failureContext.metadataBefore = before;
-      if (wasCancelled(options)) throw new AnalysisCancelledError(operation);
+      if (wasCancelled(options))
+        throw new AnalysisCancelledError(operation, {
+          cause: options?.signal?.reason,
+        });
       if (operation === "health") return this.#health(before);
       if (!isIdaOperation(operation))
         throw new AnalysisProtocolError(
@@ -306,14 +321,20 @@ export class IdaSessionClient implements AnalysisClient {
       const runner = this.#runner(options);
       failureContext.runner = runner;
       const result = await runner.run(operation, parameters);
-      if (wasCancelled(options)) throw new AnalysisCancelledError(operation);
+      if (wasCancelled(options))
+        throw new AnalysisCancelledError(operation, {
+          cause: options?.signal?.reason,
+        });
       failureContext.postOperationIdentityCheck = "started";
       const after = await this.#observe(
         options,
         (observed) => (failureContext.metadataAfter = observed),
       );
       failureContext.postOperationIdentityCheck = "verified";
-      if (wasCancelled(options)) throw new AnalysisCancelledError(operation);
+      if (wasCancelled(options))
+        throw new AnalysisCancelledError(operation, {
+          cause: options?.signal?.reason,
+        });
       return ok(
         createAnalysisExecution(result, IDA_PROVIDER_IDENTITY, {
           rawResult: {
@@ -390,7 +411,7 @@ export class IdaSessionClient implements AnalysisClient {
     let failure: AnalysisError;
     if (wasCancelled(options)) {
       failure = new AnalysisCancelledError(operation, {
-        cause,
+        cause: options?.signal?.reason,
         ...(cause instanceof AnalysisError
           ? {
               capturedOutput: cause.capturedOutput,

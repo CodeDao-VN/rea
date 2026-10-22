@@ -246,6 +246,35 @@ describe("attached IDA readiness and queued cancellation", () => {
     await client.close();
   });
 
+  it("keeps the caller's abort reason as the cause of admission and in-flight cancellation", async () => {
+    const { producer, client } = await fixture("headless");
+    const admissionReason = { reason: "admission" };
+    const admission = new AbortController();
+    admission.abort(admissionReason);
+    const admitted = await client.execute(
+      "list_procedures",
+      {},
+      { signal: admission.signal },
+    );
+    if (admitted.ok) throw new Error("expected admission cancellation");
+    expect(admitted.error.cause).toBe(admissionReason);
+
+    const inFlightReason = { reason: "in-flight" };
+    const controller = new AbortController();
+    producer.beforeCall = async (name) => {
+      if (name === "list_funcs") controller.abort(inFlightReason);
+    };
+    const result = await client.execute(
+      "list_procedures",
+      {},
+      { signal: controller.signal },
+    );
+    if (result.ok) throw new Error("expected in-flight cancellation");
+    expect(result.error._tag).toBe("AnalysisCancelledError");
+    expect(result.error.cause).toBe(inFlightReason);
+    await client.close();
+  });
+
   it("returns cold and pending startup calls immediately, then cancels queued work before dispatch", async () => {
     const { producer, client } = await fixture("headless");
     await expect(client.executeIfReady("list_procedures", {})).resolves.toBe(
