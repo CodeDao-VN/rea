@@ -5,6 +5,7 @@ import {
   rustBinarySchema,
   rustAuditableMetadataSchema,
   rustcCommitSchema,
+  rustFormatForSubject,
   type RustBinary,
 } from "../rust/rustBinary.js";
 import { isImmutableJsonSnapshot } from "../immutableJson.js";
@@ -143,7 +144,7 @@ export const projectRustBinaryView = (
     subject == null ||
     subject.local_path !== report.artifact.path ||
     subject.digest.sha256 !== report.artifact.sha256 ||
-    subject.format !== (report.format === "macho" ? "mach-o" : report.format) ||
+    subject.format !== rustFormatForSubject(report.format) ||
     subject.architecture !==
       (rustArchitectureForSubject(report.architecture) ?? null)
   )

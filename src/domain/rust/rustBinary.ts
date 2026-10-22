@@ -20,6 +20,17 @@ export const rustArchitectureForSubject = (architecture: string) => {
   }
 };
 
+const SUBJECT_FORMATS = {
+  elf: "elf",
+  pe: "pe",
+  macho: "mach-o",
+  wasm: "file",
+} as const;
+
+/** Evidence subjects name native containers; a WebAssembly module is a file, as for WABT. */
+export const rustFormatForSubject = (format: keyof typeof SUBJECT_FORMATS) =>
+  SUBJECT_FORMATS[format];
+
 /** Known revisions used to interpret compatible cargo-auditable documents. */
 export const RUST_AUDITABLE_FORMAT_VERSIONS = [0, 1, 8] as const;
 
@@ -84,15 +95,22 @@ export const rustBinarySchema = z
       sha256: digestSchema,
       bytes: index,
     }),
-    format: z.enum(["elf", "pe", "macho"]),
+    format: z.enum(["elf", "pe", "macho", "wasm"]),
     architecture: z.string(),
-    bits: z.union([z.literal(32), z.literal(64)]),
+    /** Native containers declare a word size; WebAssembly declares none. */
+    bits: z.union([z.literal(32), z.literal(64)]).nullable(),
     byte_order: z.enum(["little", "big"]),
     auditable_metadata: rustAuditableMetadataSchema.nullable(),
     rustc_commit: rustcCommitSchema.nullable(),
     limitations: z.array(z.string()),
   })
   .superRefine((report, context) => {
+    if ((report.format === "wasm") !== (report.bits === null))
+      issue(
+        context,
+        ["bits"],
+        "Word size is null exactly when the container is WebAssembly.",
+      );
     const metadata = report.auditable_metadata;
     if (metadata !== null) {
       checkSection(report.artifact.bytes, metadata, context);
