@@ -3,7 +3,7 @@ import { RETURNED_REFERENCE_WIDENING_LIMITATION } from "./javascriptSemanticCove
 import { collectElectronWrappedCallPaths } from "./electronWrappedCallPaths.js";
 import {
   ELECTRON_IDENTITY_LIMITATION,
-  ELECTRON_MODULE,
+  referencesElectronModule,
 } from "./javascriptElectronMemberWrites.js";
 
 import {
@@ -130,6 +130,7 @@ export function* analyzeParsedJavaScriptStaticSourceSteps(
     source,
     accumulator,
     electronIdentity,
+    () => completeSemanticSteps(index.indexMemberMutationFactsSteps()),
   );
   addSourceMapDirectives(source, file.comments ?? [], accumulator);
   return finalizeStaticAnalysis(source, file, accumulator, bindings);
@@ -189,10 +190,7 @@ const finalizeStaticAnalysis = (
           "Compiler options are unavailable; inline type-only imports or re-exports may preserve a module side-effect dependency.",
         ]
       : []),
-    ...(accumulator.references.some(
-      ({ value }) =>
-        value.specifier !== null && ELECTRON_MODULE.test(value.specifier),
-    )
+    ...(referencesElectronModule(accumulator.references)
       ? [ELECTRON_IDENTITY_LIMITATION]
       : []),
     "JavaScript syntax was parsed as data and was never evaluated.",
