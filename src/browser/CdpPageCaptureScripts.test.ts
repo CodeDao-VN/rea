@@ -208,3 +208,45 @@ it("leaves source-off capture unchanged and does not issue source reads", async 
     count: 1,
   });
 });
+
+it("maintains a consistent inventory boundary when a late script is parsed during source reads", async () => {
+  const input = inspectWebPageInputSchema.parse({
+    cdp_endpoint: "http://127.0.0.1:9222",
+    target_id: "page-1",
+    allowed_origins: ["https://example.test"],
+    observation_ms: 0,
+    include_script_sources: true,
+  });
+  const events = new CdpCaptureEvents(input, new Set(input.allowed_origins));
+  events.scripts.set("first", script("first"));
+
+  const send = vi.fn(async (method: string, _params: unknown) => {
+    if (method === "Debugger.getScriptSource") {
+      // Simulate a late script parsed during the first script's source fetch
+      events.scripts.set("late", script("late"));
+      return { scriptSource: "const first = 1;" };
+    }
+    throw new Error(`Unexpected CDP command: ${method}`);
+  });
+
+  const context = {
+    connection: { send } as unknown as CdpConnection,
+    sessionId: undefined,
+    operation: "inspect_web_page",
+    discovery: undefined,
+    target: undefined,
+    input,
+  } as unknown as CaptureContext;
+
+  const result = await captureScripts({
+    context,
+    events,
+    rawResources: [],
+    resources: [],
+    frameIds: new Set(),
+  });
+
+  expect(result.inventory.total).toBe(1);
+  expect(result.inventory.items).toHaveLength(1);
+  expect(result.inventory.items[0]?.cdp_hash).toBe("first");
+});

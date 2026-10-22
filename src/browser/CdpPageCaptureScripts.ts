@@ -117,9 +117,9 @@ export const captureScripts = async (
     events.completeness.exclude(
       "script_sources",
       "not_approved",
-      events.scripts.size,
+      scripts.length,
     );
-  return keyAndBuildInventory(drafts, events.scripts.size);
+  return keyAndBuildInventory(drafts, scripts.length);
 };
 
 const buildScriptDraft = (
