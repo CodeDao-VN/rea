@@ -521,14 +521,20 @@ const dolLifecycleTargetSchema = z.object({
   ),
 });
 
+/**
+ * Every open-target variant. open_binary and binary_session share this list so
+ * a target that open_binary returns is always valid in binary_session status.
+ */
+const openLifecycleTargetVariants = [
+  detectedLifecycleTargetSchema,
+  rawLifecycleTargetSchema,
+  dolLifecycleTargetSchema,
+] as const;
+
 /** Exact structured-content schemas for target lifecycle operations. */
 export const sessionOutputSchemas = {
   open_binary: lifecycleResultOf(
-    z.discriminatedUnion("format", [
-      detectedLifecycleTargetSchema,
-      rawLifecycleTargetSchema,
-      dolLifecycleTargetSchema,
-    ]),
+    z.discriminatedUnion("format", [...openLifecycleTargetVariants]),
   ),
   open_bundle_resources: lifecycleResultOf(bundleResourceRootSchema),
   close_binary: lifecycleResultOf(
@@ -562,14 +568,9 @@ export const sessionOutputSchemas = {
         session_kind: z.literal("bundle_resources"),
         resource_root: bundleResourceRootSchema,
       }),
-      sessionProvider.extend({
-        open: z.literal(true),
-        ...detectedLifecycleTargetSchema.shape,
-      }),
-      sessionProvider.extend({
-        open: z.literal(true),
-        ...rawLifecycleTargetSchema.shape,
-      }),
+      ...openLifecycleTargetVariants.map((variant) =>
+        sessionProvider.extend({ open: z.literal(true), ...variant.shape }),
+      ),
     ]),
   ),
   export_evidence_bundle: lifecycleResultOf(

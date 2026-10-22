@@ -125,6 +125,11 @@ async function runPass({ fixture, languageOverride, label, layout }) {
     });
     assert.equal(target.architecture, "powerpc");
     assert.equal(target.sha256, fixture.sha256);
+    const status = await call("binary_session");
+    assert.equal(status.open, true);
+    assert.equal(status.format, "gamecube-dol");
+    assert.equal(status.architecture, "powerpc");
+    assert.equal(status.analysis_provider_binding?.provider?.id, "ghidra");
     const image = await call("inspect_native_load_image");
     const expectedLanguage = languageOverride ?? STOCK_LANGUAGE;
     assertDolLoadImage(image, {
