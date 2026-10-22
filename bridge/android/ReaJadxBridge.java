@@ -189,12 +189,14 @@ class ReaJadxBridge {
                   "type", field.getType().toString(), "def_pos", 0)).toList();
           List<String> inner = node.getInnerClasses().stream().map(ClassNode::getFullName).toList();
           Map<String, Object> summary = Map.of(
-              "full_name", cls.getFullName(), "name", cls.getName(),
+              "full_name", cls.getFullName(), "raw_name", cls.getRawName(), "name", cls.getName(),
               "method_count", methods.size(), "field_count", fields.size(),
               "inner_class_count", inner.size(), "inner_classes", inner,
               "methods", methods.stream().map(MethodSnapshot::summary).toList(), "fields", fields);
-          index.computeIfAbsent(cls.getFullName(), ignored -> new ArrayList<>())
-              .add(new ClassSnapshot(cls, methods, summary));
+          ClassSnapshot snapshot = new ClassSnapshot(cls, methods, summary);
+          index.computeIfAbsent(cls.getFullName(), ignored -> new ArrayList<>()).add(snapshot);
+          if (!cls.getRawName().equals(cls.getFullName()))
+            index.computeIfAbsent(cls.getRawName(), ignored -> new ArrayList<>()).add(snapshot);
         }
       }
       classes = Collections.unmodifiableMap(index);

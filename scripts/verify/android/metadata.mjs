@@ -93,6 +93,13 @@ export const verifyAndroidMetadata = async ({
       result.stdout,
       /DIRECT_INVOKE_REGRESSION_PASS nodes=1 offsets=0,3 cross_dex=true/u,
     );
+    assert.match(
+      result.stdout,
+      /BINARY_CLASS_REGRESSION_PASS inner=true method=true/u,
+    );
+    console.log(
+      "PASS real binary-name lookup for nested-class metadata and methods",
+    );
     console.log(
       "PASS real cold metadata, full generic types and stable overloaded method selection",
     );

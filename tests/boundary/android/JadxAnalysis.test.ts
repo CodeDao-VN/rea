@@ -11,6 +11,7 @@ import {
 
 const summary = {
   full_name: "fixture.Target",
+  raw_name: "fixture.Target",
   name: "Target",
   method_count: 2,
   field_count: 0,
@@ -245,6 +246,64 @@ it("publishes exact DEX prototypes instead of discarding bridge metadata", async
       { name: "choose", dex_descriptor: "(Ljava/lang/String;)V" },
       { name: "choose", dex_descriptor: "(I)V" },
     ],
+  });
+});
+
+it("accepts a JADX binary class name and keeps the canonical identity", async () => {
+  const binarySummary = {
+    ...summary,
+    full_name: "fixture.Manager.WorkerThread",
+    raw_name: "fixture.Manager$WorkerThread",
+    name: "WorkerThread",
+  };
+  const calls: { name: string; input: Readonly<Record<string, unknown>> }[] =
+    [];
+  const tools: JadxToolPort = {
+    json: (name, input) => {
+      calls.push({ name, input });
+      if (name === "get_class_summary") return Promise.resolve(binarySummary);
+      return Promise.resolve({
+        class_name: "fixture.Manager.WorkerThread",
+        method_name: "choose",
+        full_name: "fixture.Manager.WorkerThread.choose",
+        overload_index: 0,
+        overload_count: 2,
+        dex_descriptor: "(Ljava/lang/String;)V",
+        mode: "java",
+        fell_back: false,
+        markers: [],
+        body: "void choose(String value) {}",
+      });
+    },
+    text: () => Promise.reject(new Error("unexpected text call")),
+  };
+
+  const result = await analyzeJadxRequest(
+    tools,
+    {
+      operation: "inspect_android_method",
+      input: androidInputSchemas.inspect_android_method.parse({
+        path: "/fixture.apk",
+        class_name: "fixture.Manager$WorkerThread",
+        method_name: "choose",
+        overload_index: 0,
+      }),
+    },
+    {} as never,
+    engine,
+  );
+
+  expect(result).toMatchObject({
+    class_name: "fixture.Manager.WorkerThread",
+    source: { text: "void choose(String value) {}" },
+  });
+  expect(calls[0]).toMatchObject({
+    name: "get_class_summary",
+    input: { class_name: "fixture.Manager$WorkerThread" },
+  });
+  expect(calls[1]).toMatchObject({
+    name: "get_method_body",
+    input: { class_name: "fixture.Manager.WorkerThread" },
   });
 });
 

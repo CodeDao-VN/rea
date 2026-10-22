@@ -155,6 +155,30 @@ public class ReaJadxMetadataRegression {
     System.out.println("DIRECT_INVOKE_REGRESSION_PASS nodes=1 offsets=0,3 cross_dex=true");
   }
 
+  private static void verifyBinaryClassName(JadxDecompiler decompiler, Method handle, Object bridge)
+      throws Exception {
+    ClassNode binaryClass = decompiler.getRoot().getClasses().stream()
+        .filter(node -> node.getRawName().contains("$") && !node.getRawName().equals(node.getFullName()))
+        .filter(node -> !node.getMethods().isEmpty())
+        .findFirst()
+        .orElseThrow(() -> new AssertionError("Fixture has no nested class with methods"));
+    JsonObject summary = call(handle, bridge, "get_class_summary", arguments(binaryClass.getRawName()));
+    require(summary.get("full_name").getAsString().equals(binaryClass.getFullName()),
+        "Binary lookup returned a different canonical class");
+    require(summary.get("raw_name").getAsString().equals(binaryClass.getRawName()),
+        "Binary lookup lost the raw class name");
+
+    String methodName = summary.getAsJsonArray("methods").get(0).getAsJsonObject().get("name").getAsString();
+    JsonObject methodArgs = arguments(binaryClass.getRawName());
+    methodArgs.addProperty("method_name", methodName);
+    JsonObject body = call(handle, bridge, "get_method_body", methodArgs);
+    require(body.get("class_name").getAsString().equals(binaryClass.getFullName()),
+        "Binary method lookup returned a different canonical class");
+    require(body.get("method_name").getAsString().equals(methodName),
+        "Binary method lookup returned a different method");
+    System.out.println("BINARY_CLASS_REGRESSION_PASS inner=true method=true");
+  }
+
   private static void checkDirectInvokes(JsonObject refs, String dexEntry) {
     require(refs.get("total").getAsInt() == 1, "JADX using-node count changed");
     JsonArray sites = refs.getAsJsonArray("items").get(0).getAsJsonObject()
@@ -495,6 +519,7 @@ public class ReaJadxMetadataRegression {
       require(componentSummary.equals(call(handle, bridge, "get_class_summary", componentArgs)),
           "Frozen summary changed after code generation");
       require(apiSummary.equals(call(handle, bridge, "get_class_summary", apiArgs)), "Unrelated frozen summary changed");
+      verifyBinaryClassName(decompiler, handle, bridge);
       System.out.println("METADATA_REGRESSION_PASS classes=" + states.size() + " overloads=" + signatures.size()
           + " reference_counts=" + referenceCounts);
       verifyInitializers(holder, config, constructor, handle, initializerFixture(args[1], args[2]));

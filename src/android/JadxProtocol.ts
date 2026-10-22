@@ -71,6 +71,7 @@ export const jadxClassPageSchema = z.object({
 });
 export const jadxClassSchema = z.object({
   full_name: z.string(),
+  raw_name: z.string(),
   name: z.string(),
   method_count: count,
   field_count: count,
