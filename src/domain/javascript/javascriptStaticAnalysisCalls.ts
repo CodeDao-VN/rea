@@ -444,7 +444,16 @@ const inspectEndpointCall = (
   if (isKnownNetworkRequest(node, bindings)) {
     const target = argumentNode(node.arguments[0]);
     if (target === undefined) return;
-    const literal = stringValue(target);
+    let literal = stringValue(target);
+    const request = unwrapJavaScriptExpression(target).node;
+    if (
+      literal === undefined &&
+      t.isNewExpression(request) &&
+      (t.isCallExpression(node) || t.isOptionalCallExpression(node)) &&
+      isUnmodifiedGlobalReference(node.callee, bindings, "fetch") &&
+      isUnmodifiedGlobalReference(request.callee, bindings, "Request")
+    )
+      literal = stringValue(request.arguments[0]);
     if (literal !== undefined) {
       addEndpoint(context, {
         node,
