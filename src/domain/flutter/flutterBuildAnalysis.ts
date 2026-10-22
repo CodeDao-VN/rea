@@ -32,7 +32,9 @@ const abiSelectorSchema = z
     },
     { message: ABI_SELECTOR_MESSAGE, abort: true },
   )
-  .regex(/^[^\/]*$/u, ABI_SELECTOR_MESSAGE)
+  // Keep the advertised pattern valid in Unicode-sets mode after JS autofix,
+  // which otherwise removes the slash escape inside this character class.
+  .regex(/^[^\x2f]*$/u, ABI_SELECTOR_MESSAGE)
   .meta({ maxLength: ABI_SELECTOR_MAX_CHARACTERS });
 
 /**
