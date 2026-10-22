@@ -53,6 +53,7 @@ import {
   workflowAnalysisProfile,
 } from "./InvestigationProviders.js";
 import {
+  composedLimitationBudget,
   executeComposedWorkflow,
   createWorkflowEvidence,
   workflowSnapshotRecord,
@@ -565,8 +566,11 @@ const executeAnalysisTool = async (input: {
     tool === "decompile_all"
   ) {
     const { EnhancedTools } = await import("./EnhancedTools.js");
-    const result = await executeComposedWorkflow(session, (observed) =>
-      new EnhancedTools(observed).execute(tool, input.arguments, signal),
+    const result = await executeComposedWorkflow(
+      session,
+      (observed) =>
+        new EnhancedTools(observed).execute(tool, input.arguments, signal),
+      composedLimitationBudget(tool),
     );
     if (!result.ok) return result;
     const evidence = createWorkflowEvidence({
