@@ -213,6 +213,16 @@ export class EvidenceMcpServerCore extends RequestTrackingMcpServer {
     compactPresentation: CompactInputSchemaPresentation | undefined = undefined,
     private readonly omitOutputSchemas = false,
     identity?: ReturnType<typeof createCatalogIdentity>,
+    /**
+     * Tool families this registration advertises, kept as plain ids so the
+     * deferred runtime never imports the canonical schema graph. Tools outside
+     * the scope stay registered but disabled: `tools/list` omits them and
+     * calls fail with the SDK's disabled-tool error instead of silently
+     * disappearing.
+     */
+    readonly advertisedToolFamilies:
+      | ReadonlySet<string>
+      | undefined = undefined,
   ) {
     super(info, options);
     this.compactPresentation =
@@ -261,7 +271,32 @@ export class EvidenceMcpServerCore extends RequestTrackingMcpServer {
         : undefined;
     const registeredConfig =
       inputSchema === undefined ? config : { ...config, inputSchema };
-    return this.bindTool(name, registeredConfig as never, callback as never);
+    const registered = this.bindTool(
+      name,
+      registeredConfig as never,
+      callback as never,
+    );
+    if (!this.advertisesTool(name)) registered.disable();
+    return registered;
+  }
+
+  /**
+   * Whether a tool is advertised under this registration's family scope.
+   * Composition owns the tool-to-family mapping; the core only knows the
+   * scope so it can keep the canonical schema graph out of the deferred path.
+   */
+  advertisesTool(_name: string): boolean {
+    return true;
+  }
+
+  /**
+   * Whether a tool family is advertised under this registration's scope.
+   * Availability probing consults this before launching provider probes
+   * whose tools cannot appear in the response.
+   */
+  advertisesFamily(family: string): boolean {
+    if (this.advertisedToolFamilies === undefined) return true;
+    return this.advertisedToolFamilies.has(family);
   }
 
   protected bindTool(

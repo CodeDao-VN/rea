@@ -35,12 +35,12 @@ export const runSessionStatus = async (
       server_identity: createServerIdentity({
         startedAt: new Date().toISOString(),
         commandPath: CURRENT_ENTRYPOINT_PATH,
-        catalog: createCatalogIdentity(
-          compactPresentationForMcpInputSchemaProfile(
+        catalog: createCatalogIdentity({
+          compactPresentation: compactPresentationForMcpInputSchemaProfile(
             config.value.mcpInputSchemaProfile,
           ),
-          config.value.mcpOutputSchemaProfile ?? "full",
-        ),
+          outputSchemaProfile: config.value.mcpOutputSchemaProfile ?? "full",
+        }),
       }),
     };
   } finally {

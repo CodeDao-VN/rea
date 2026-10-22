@@ -11,8 +11,9 @@ import {
   parseMcpInputSchemaProfile,
 } from "./config/mcpInputSchemaProfile.js";
 import { parseMcpOutputSchemaProfile } from "./config/mcpOutputSchemaProfile.js";
-import { PROMPT_CONTRACTS } from "./contracts/promptContracts.js";
-import { TOOL_CONTRACTS } from "./contracts/toolContracts.js";
+import { parseMcpToolFamilies } from "./config/mcpToolFamilies.js";
+import { contractsForToolFamilies } from "./contracts/toolFamilies.js";
+import { promptsForToolFamilies } from "./contracts/promptContracts.js";
 import { err, ok } from "./domain/result.js";
 import { PRODUCT_IDENTITY } from "./identity.js";
 import {
@@ -83,7 +84,7 @@ interface McpDoctorCheck {
 
 /** Diagnose the actual production stdio adapter with one startup-bounded SDK session. */
 export const runProductionMcpDoctor = async (options: McpDoctorOptions) => {
-  const catalog = catalogIdentityForEnvironment(options.environment);
+  const expectation = doctorExpectationForEnvironment(options.environment);
   const budgetMs = options.deadlineMs ?? MCP_STARTUP_POLICY.doctorDeadlineMs;
   const deadline = performance.now() + budgetMs;
   const controller = new AbortController();
@@ -112,7 +113,7 @@ export const runProductionMcpDoctor = async (options: McpDoctorOptions) => {
       client,
       deadline,
       controller.signal,
-      catalog,
+      expectation,
       budgetMs,
     );
   } catch (cause: unknown) {
@@ -195,11 +196,18 @@ class OwnedStdioClientTransport extends StdioClientTransport {
   }
 }
 
+/** Doctor expectations derived from the same environment the child inherits. */
+interface DoctorCatalogExpectation {
+  readonly catalog: ReturnType<typeof createCatalogIdentity>;
+  readonly expectedToolNames: readonly string[];
+  readonly expectedPromptNames: readonly string[];
+}
+
 const inspectProductionMcpSession = async (
   client: Client,
   deadline: number,
   signal: AbortSignal,
-  catalog: ReturnType<typeof createCatalogIdentity>,
+  expectation: DoctorCatalogExpectation,
   budgetMs: number,
 ) => {
   const request = requestOptions(deadline, signal);
@@ -208,33 +216,44 @@ const inspectProductionMcpSession = async (
     client.listPrompts(undefined, request),
   ]);
   const sessionTool = tools.tools.find(({ name }) => name === "binary_session");
-  const requestFlow = await client
-    .callTool(
-      { name: "binary_session", arguments: {} },
-      {
-        ...requestOptions(deadline, signal),
-        ...(sessionTool === undefined ? {} : { toolDefinition: sessionTool }),
-      },
-    )
-    .then(ok, (cause: unknown) =>
-      err({
+  // A scope without the session family cannot serve request flow at all;
+  // every other case still probes the call so the report names the real cause.
+  const requestFlow = expectation.expectedToolNames.includes("binary_session")
+    ? await client
+        .callTool(
+          { name: "binary_session", arguments: {} },
+          {
+            ...requestOptions(deadline, signal),
+            ...(sessionTool === undefined
+              ? {}
+              : { toolDefinition: sessionTool }),
+          },
+        )
+        .then(ok, (cause: unknown) =>
+          err({
+            kind: "request-flow" as const,
+            detail: doctorTransportDetail(cause, budgetMs),
+          }),
+        )
+    : err({
         kind: "request-flow" as const,
-        detail: doctorTransportDetail(cause, budgetMs),
-      }),
-    );
+        detail:
+          "binary_session is outside the selected tool families; include the session family for request-flow and identity checks",
+      });
   const inventory = {
     tools: compareInventory(
-      TOOL_CONTRACTS.map(({ name }) => name),
+      expectation.expectedToolNames,
       tools.tools.map(({ name }) => name),
     ),
     prompts: compareInventory(
-      PROMPT_CONTRACTS.map(({ name }) => name),
+      expectation.expectedPromptNames,
       prompts.prompts.map(({ name }) => name),
     ),
   };
   const observedIdentity = parseIdentityToolResult(
     requestFlow.ok ? requestFlow.value.structuredContent : undefined,
   );
+  const { catalog } = expectation;
   const serverVersion = client.getServerVersion();
   const protocolVersion = client.getNegotiatedProtocolVersion();
   const checks: McpDoctorCheck[] = [
@@ -497,21 +516,39 @@ const targetFreeEnvironment = (
   return result;
 };
 
-const catalogIdentityForEnvironment = (
+const doctorExpectationForEnvironment = (
   environment: Readonly<Record<string, string | undefined>>,
-): ReturnType<typeof createCatalogIdentity> => {
+): DoctorCatalogExpectation => {
   const inputProfile = parseMcpInputSchemaProfile(
     environment.REA_MCP_INPUT_SCHEMA_PROFILE,
   );
   const outputProfile = parseMcpOutputSchemaProfile(
     environment.REA_MCP_OUTPUT_SCHEMA_PROFILE,
   );
-  return createCatalogIdentity(
-    compactPresentationForMcpInputSchemaProfile(
-      inputProfile.ok ? inputProfile.value : undefined,
-    ),
-    outputProfile.ok ? (outputProfile.value ?? "full") : "full",
-  );
+  // An invalid selection fails child startup, which the transport check
+  // reports with the server's diagnostics; expect the complete catalog so a
+  // failed start is never mistaken for a scope mismatch.
+  const families = parseMcpToolFamilies(environment.REA_MCP_TOOL_FAMILIES);
+  const selection =
+    families.ok && families.value !== undefined
+      ? new Set(families.value)
+      : undefined;
+  const contracts = contractsForToolFamilies(selection);
+  const promptContracts = promptsForToolFamilies(selection);
+  return {
+    catalog: createCatalogIdentity({
+      compactPresentation: compactPresentationForMcpInputSchemaProfile(
+        inputProfile.ok ? inputProfile.value : undefined,
+      ),
+      contracts,
+      outputSchemaProfile: outputProfile.ok
+        ? (outputProfile.value ?? "full")
+        : "full",
+      promptContracts,
+    }),
+    expectedToolNames: contracts.map(({ name }) => name),
+    expectedPromptNames: promptContracts.map(({ name }) => name),
+  };
 };
 
 const captureStderr = () => {
