@@ -106,7 +106,12 @@ describe("analysis context queries: navigation", () => {
         ok(
           createAnalysisExecution(
             operation === "resolve_containing_procedure"
-              ? { found: false, procedure: null, reason: "not_in_procedure" }
+              ? {
+                  query_address: "",
+                  found: false,
+                  procedure: null,
+                  reason: "not_in_procedure",
+                }
               : "",
             provider,
           ),

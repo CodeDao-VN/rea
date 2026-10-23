@@ -58,3 +58,65 @@ it.each([
     });
   },
 );
+
+const body = { available: false, reason: "Body ranges were not observed." };
+const main = { address: "0x401000", name: "main", classification: null, body };
+const located = (resolution: unknown) =>
+  navigate({
+    current_document: "fixture",
+    current_address: "0x401000",
+    resolve_containing_procedure: resolution,
+  });
+
+it.each([
+  { shape: "a null result", resolution: null },
+  {
+    shape: "a found result without a procedure",
+    resolution: { query_address: "0x401000", found: true, procedure: null },
+  },
+  {
+    shape: "a found procedure without a name",
+    resolution: {
+      query_address: "0x401000",
+      found: true,
+      procedure: { address: "0x401000", classification: null, body },
+    },
+  },
+  {
+    shape: "a result without found",
+    resolution: { query_address: "0x401000", procedure: null },
+  },
+])(
+  "delivers a typed MCP failure for $shape from resolve_containing_procedure",
+  async ({ resolution }) => {
+    const result = await located(resolution);
+    expect(parseMcpToolError(result).error).toMatchObject({
+      code: "unreadable_output",
+      details: { operation: "resolve_containing_procedure" },
+    });
+  },
+);
+
+it.each([
+  {
+    resolution: {
+      query_address: "0x401000",
+      found: false,
+      procedure: null,
+      reason: "not_in_procedure",
+    },
+    procedure: null,
+  },
+  {
+    resolution: { query_address: "0x401000", found: true, procedure: main },
+    procedure: "main",
+  },
+])(
+  "returns procedure $procedure for a valid resolution",
+  async ({ resolution, procedure }) => {
+    const result = await located(resolution);
+    expect(result.structuredContent).toEqual({
+      result: { document: "fixture", address: "0x401000", procedure },
+    });
+  },
+);

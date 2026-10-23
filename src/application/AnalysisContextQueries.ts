@@ -7,6 +7,7 @@ import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { AnalysisOutputError } from "../domain/analysisErrorCore.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { analysisBookmarkSchema } from "../domain/hopperValues.js";
+import { containingProcedureResolution } from "../contracts/toolOutputSchemaPrimitives.js";
 import { resolveAnalysisDocument } from "./AnalysisDocument.js";
 import { err, ok, type Result } from "../domain/result.js";
 
@@ -74,10 +75,21 @@ export const getNavigationContext = async (
       procedure: null,
     });
   }
+  // Only a valid absent resolution means no procedure contains the address.
+  const resolution = containingProcedureResolution.safeParse(
+    procedure.value.result,
+  );
+  if (!resolution.success)
+    return err(
+      new AnalysisOutputError(
+        "resolve_containing_procedure",
+        "expected a containing-procedure resolution",
+      ),
+    );
   return ok({
     document: documentName,
     address: address.value.result,
-    procedure: containingProcedureName(procedure.value.result),
+    procedure: resolution.data.found ? resolution.data.procedure.name : null,
   });
 };
 
@@ -154,20 +166,6 @@ const isRequestLevelFailure = (error: AnalysisError): boolean =>
   error._tag === "AnalysisCancelledError" ||
   error._tag === "AnalysisTimeoutError" ||
   error._tag === "NoBinaryOpenError";
-
-const containingProcedureName = (value: JsonValue): string | null => {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return null;
-  if (value.found !== true) return null;
-  const procedure = value.procedure;
-  if (
-    typeof procedure !== "object" ||
-    procedure === null ||
-    Array.isArray(procedure)
-  )
-    return null;
-  return typeof procedure.name === "string" ? procedure.name : null;
-};
 
 const resolvedAddress = (
   result: Result<AnalysisExecution, AnalysisError> | undefined,
