@@ -161,7 +161,13 @@ const fromState = (answer: ReplayResult): boolean =>
 
 /** The environment's body as the application's is read: a replayed recording of empty text, unlike a JSON empty string, is no body. */
 const envBody = (run: ProbeRun, answer: ReplayResult): JsonValue => {
-  if (answer.body !== "" || fromState(answer)) return answer.body;
+  const state = (answer as Partial<StateAnswer>).state;
+  // Missing entities answer with a recorded absence, not a body rendered from state.
+  if (
+    answer.body !== "" ||
+    (state?.source === "state" && state.view !== "missing")
+  )
+    return answer.body;
   const exchange = run.source.exchanges.get(answer.replay.record_ordinal);
   return exchange !== undefined && replayedBody(exchange).kind === "json"
     ? answer.body

@@ -8,6 +8,7 @@ import { environmentStateServeFixture } from "../../fixtures/environmentServe.js
 import {
   BOOK_NOT_FOUND,
   BOOK_ROWS,
+  FIRST_BOOK,
   book,
 } from "../../fixtures/environmentStateWrites.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
@@ -35,6 +36,93 @@ const writeCompareFiles = async (root: string) => {
 };
 
 describe("rea environment-compare", () => {
+  for (const { name, recorded, live, differences } of [
+    { name: "empty text", recorded: "", live: "", differences: [] },
+    {
+      name: "matching JSON errors",
+      recorded: { detail: "Not found." },
+      live: { detail: "Not found." },
+      differences: [],
+    },
+    {
+      name: "changed JSON errors",
+      recorded: { detail: "Not found." },
+      live: { detail: "Missing." },
+      differences: [
+        {
+          category: "value",
+          pointer: "/detail",
+          live: '"Missing."',
+          env: '"Not found."',
+        },
+      ],
+    },
+    {
+      name: "a JSON empty string versus no body",
+      recorded: '""',
+      live: "",
+      differences: [
+        { category: "value", pointer: "", live: "null", env: '""' },
+      ],
+    },
+  ]) {
+    cliTest(
+      `compares recorded missing-item responses with ${name}`,
+      async ({ cli }) => {
+        const root = await createTestTempDirectory("rea-compare-missing-cli-");
+        const fixture = environmentStateServeFixture(
+          timedCaptureEvidence([
+            ["GET", "/api/books", [FIRST_BOOK]],
+            ["GET", "/api/books/1", FIRST_BOOK],
+            ["GET", "/api/books/9", recorded, 404],
+          ]),
+        );
+        const probe = timedCaptureEvidence([
+          ["GET", "/api/books", [{ ...FIRST_BOOK, id: 101 }]],
+          ["GET", "/api/books/999", live, 404],
+        ]);
+        for (const [file, value] of Object.entries({
+          manifest: fixture.manifest,
+          capture: fixture.capture,
+          probe,
+        })) {
+          await writeFile(join(root, `${file}.json`), JSON.stringify(value));
+        }
+        const result = await cli.run({
+          arguments: [
+            "environment-compare",
+            join(root, "manifest.json"),
+            "--evidence",
+            join(root, "capture.json"),
+            "--probe",
+            join(root, "probe.json"),
+            "--json",
+          ],
+          timeoutMs: 30_000,
+        });
+        expect(result.exitCode).toBe(0);
+        const equal = differences.length === 0;
+        expect(result.json).toMatchObject({
+          status: "complete",
+          environment: { state: "served" },
+          summary: {
+            steps: 2,
+            equal: equal ? 2 : 1,
+            agreement: equal ? 1 : 0.5,
+          },
+          probes: [
+            {
+              results: [
+                { equal: true, differences: [] },
+                { live_status: 404, env_status: 404, equal, differences },
+              ],
+            },
+          ],
+        });
+      },
+    );
+  }
+
   cliTest(
     "compares the served environment with a probe of the re-seeded application and prints the report",
     async ({ cli }) => {
