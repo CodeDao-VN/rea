@@ -11,6 +11,7 @@ import {
 } from "../../domain/analysisErrorCore.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { createEvidence, type Evidence } from "../../domain/evidence.js";
+import { projectInputIssues } from "../../domain/inputIssueProjection.js";
 import { jsonObjectSchema } from "../../domain/jsonValue.js";
 import { err, type Result } from "../../domain/result.js";
 import { completeProviderEvidence } from "../ProviderOperationExecution.js";
@@ -31,7 +32,18 @@ export class AndroidAnalysisService {
       );
     const request = androidRequestSchema.safeParse({ operation, input });
     if (!request.success)
-      return err(new AnalysisInputError(operation, { cause: request.error }));
+      return err(
+        new AnalysisInputError(
+          operation,
+          { cause: request.error },
+          projectInputIssues(request.error.issues, { operation, input }).map(
+            (issue) =>
+              issue.path[0] === "input"
+                ? { ...issue, path: issue.path.slice(1) }
+                : issue,
+          ),
+        ),
+      );
     const target = await parseBinaryTarget(
       request.data.input.path,
       options?.signal === undefined ? {} : { signal: options.signal },
