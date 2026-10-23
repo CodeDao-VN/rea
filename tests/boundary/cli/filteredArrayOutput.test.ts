@@ -167,3 +167,33 @@ it("finishes JSONL after a bounded large record before a missing selection", asy
   ]);
   expect(output.failed).toBe(false);
 });
+
+it("keeps fields selected from the same array slice by later sibling paths", async () => {
+  const value = {
+    selected: [
+      { selected: 1, other: 2 },
+      { selected: 3, other: 4 },
+    ],
+  };
+  const chunks: Buffer[] = [];
+  const output = createCliResultOutput(
+    ["--json", "--filter-output", "selected[0,2].selected,selected[0,2].other"],
+    new Writable({
+      write(chunk: Buffer, _encoding, callback) {
+        chunks.push(chunk);
+        callback();
+      },
+    }),
+  );
+  await output?.write(value, {
+    command: "rows",
+    duration: "0ms",
+    format: "json",
+  });
+  expect(JSON.parse(Buffer.concat(chunks).toString())).toEqual({
+    selected: [
+      { selected: 1, other: 2 },
+      { selected: 3, other: 4 },
+    ],
+  });
+});

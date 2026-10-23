@@ -228,7 +228,9 @@ export const createCliResultOutput = (
       return false;
     const filtered: unknown =
       operationFailure ??
-      (filterPaths === undefined ? value : Filter.apply(value, filterPaths));
+      (filterPaths === undefined
+        ? value
+        : applyCliOutputFilter(value, filterPaths));
     const ownsSuccessfulTokenWindow =
       operationFailure === undefined &&
       options.tokenWindow &&
@@ -426,6 +428,103 @@ const fullFailureEnvelope = (
     error: `${window.text}\n[truncated: showing tokens ${offset}–${window.end} of ${window.total}]`,
     meta: { ...meta, ...(nextOffset === undefined ? {} : { nextOffset }) },
   };
+};
+
+/**
+ * Apply the parsed CLI output filter. Incur's Filter.merge assigns each path's
+ * result to the target key, so a later path through the same array slice
+ * replaces the slice an earlier path produced. When sibling paths share a
+ * slice prefix, project each path separately and merge element-wise so every
+ * selected field survives; single-path and conflict-free selections keep
+ * Filter.apply's exact behavior.
+ */
+type CliFilterPath = ReturnType<typeof Filter.parse>[number];
+
+const isMergeableObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const sharesSlicePrefix = (paths: readonly CliFilterPath[]): boolean => {
+  for (let left = 0; left < paths.length; left += 1) {
+    for (let right = left + 1; right < paths.length; right += 1) {
+      const first = paths[left]!;
+      const second = paths[right]!;
+      const shared = Math.min(first.length, second.length);
+      for (let index = 0; index < shared; index += 1) {
+        const a = first[index]!;
+        const b = second[index]!;
+        const equal =
+          "key" in a && "key" in b
+            ? a.key === b.key
+            : "start" in a && "start" in b
+              ? a.start === b.start && a.end === b.end
+              : false;
+        if (!equal) break;
+        if ("start" in a) return true;
+      }
+    }
+  }
+  return false;
+};
+
+const mergeCliSelections = (target: unknown, selected: unknown): unknown => {
+  if (Array.isArray(target) && Array.isArray(selected)) {
+    for (
+      let index = 0;
+      index < Math.max(target.length, selected.length);
+      index += 1
+    ) {
+      const current = target[index];
+      const next = selected[index];
+      if (isMergeableObject(current) && isMergeableObject(next))
+        target[index] = mergeCliSelections(current, next);
+      else if (current === undefined || current === null) target[index] = next;
+    }
+    return target;
+  }
+  if (isMergeableObject(target) && isMergeableObject(selected)) {
+    for (const [key, next] of Object.entries(selected)) {
+      const current = target[key];
+      const bothArrays = Array.isArray(current) && Array.isArray(next);
+      if ((isMergeableObject(current) && isMergeableObject(next)) || bothArrays)
+        mergeCliSelections(current, next);
+      else target[key] = next;
+    }
+    return target;
+  }
+  return selected;
+};
+
+const selectCliFilterPath = (value: unknown, path: CliFilterPath): unknown => {
+  const selected = Filter.apply(value, [path]);
+  // Filter.apply unwraps a single key selecting a scalar; the multi-path
+  // projection keeps that selection under its key, as Filter.merge does.
+  const segment = path[0];
+  if (
+    path.length === 1 &&
+    segment !== undefined &&
+    "key" in segment &&
+    isMergeableObject(value) &&
+    selected !== undefined &&
+    !isMergeableObject(selected) &&
+    !Array.isArray(selected)
+  )
+    return { [segment.key]: selected };
+  return selected;
+};
+
+const applyCliOutputFilter = (
+  value: unknown,
+  paths: readonly CliFilterPath[],
+): unknown => {
+  if (!sharesSlicePrefix(paths)) return Filter.apply(value, [...paths]);
+  let merged: unknown;
+  for (const path of paths) {
+    const selected = selectCliFilterPath(value, path);
+    if (selected === undefined) continue;
+    merged =
+      merged === undefined ? selected : mergeCliSelections(merged, selected);
+  }
+  return merged === undefined ? Filter.apply(value, [...paths]) : merged;
 };
 
 /** Filter.apply owns these mapped arrays; an empty path list returns the source. */
