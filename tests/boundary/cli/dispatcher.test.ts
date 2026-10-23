@@ -7,7 +7,7 @@ import { workspaceCliTest } from "../../support/cli/workspaceCliFixture.js";
 import type { TestWorkspace } from "../../support/workspace/workspaceFixture.js";
 
 const CLI_OUTPUT_RUNTIME =
-  "export const normalizeCliArguments = (args) => args; export const validateCliOutputArguments = () => ({ ok: true }); export const renderCliOutputArgumentError = () => ''; export const renderEmptyFilteredCliOutput = () => undefined;\n";
+  "export const normalizeCliArguments = (args) => args; export const validateCliOutputArguments = () => ({ ok: true }); export const renderCliOutputArgumentError = () => ''; export const renderEmptyFilteredCliOutput = () => undefined; export const renderVersionReport = () => undefined;\n";
 
 const installCliRuntime = async (
   workspace: TestWorkspace,
@@ -69,10 +69,7 @@ describe("executable dispatcher", () => {
           "dist/cli-runtime/cli.js",
           'export const cliConfigurationError = () => undefined; export const closeCliJavaScriptResources = () => {}; export const createCli = () => ({ serve: (args) => process.stdout.write(JSON.stringify({ adapter: "cli", args })) });\n',
         ),
-        workspace.write(
-          "dist/cli-runtime/cliOutput.js",
-          "export const normalizeCliArguments = (args) => args; export const validateCliOutputArguments = () => ({ ok: true }); export const renderCliOutputArgumentError = () => ''; export const renderEmptyFilteredCliOutput = () => undefined;\n",
-        ),
+        workspace.write("dist/cli-runtime/cliOutput.js", CLI_OUTPUT_RUNTIME),
         workspace.write(
           "dist/cli-runtime/cliResultOutput.js",
           "export const createCliResultOutput = () => undefined;\n",

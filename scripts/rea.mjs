@@ -89,11 +89,25 @@ if (!(await compiledRuntimeExists(runtimeFiles))) {
     normalizeCliArguments,
     renderCliOutputArgumentError,
     renderEmptyFilteredCliOutput,
+    renderVersionReport,
     validateCliOutputArguments,
   } = await import("../dist/cli-runtime/cliOutput.js");
   guardClosedStdout();
   const cliArgs = normalizeCliArguments(args);
   const outputArguments = validateCliOutputArguments(cliArgs);
+  // `--version` with an explicit format reports the runtime as a document;
+  // plain `--version` stays Incur's bare version string.
+  const versionOutput = renderVersionReport(
+    cliArgs,
+    {
+      packageName: packageJson.name,
+      packageVersion: packageJson.version,
+      versions: process.versions,
+      platform: process.platform,
+      architecture: process.arch,
+    },
+    process.stdout.isTTY === true,
+  );
   const configurationError = cliConfigurationError(process.env);
   let dispatchFailure;
   // Incur can exit from the callback below before this function returns.
@@ -108,6 +122,8 @@ if (!(await compiledRuntimeExists(runtimeFiles))) {
     } else if (!outputArguments.ok) {
       writeStdout(renderCliOutputArgumentError(outputArguments));
       process.exitCode = 1;
+    } else if (versionOutput !== undefined) {
+      writeStdout(versionOutput);
     } else {
       let wroteOutput = false;
       const resultOutput = createCliResultOutput(cliArgs, process.stdout);
