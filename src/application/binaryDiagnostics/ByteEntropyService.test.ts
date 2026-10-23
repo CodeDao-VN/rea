@@ -69,6 +69,41 @@ it("rejects missing files, non-files and windows beyond EOF, but accepts empty w
   ).toContainEqual(expect.stringContaining("reports a size of 0"));
 });
 
+it("attributes byte windows beyond EOF to the selector that makes them invalid", async () => {
+  const root = await createTestTempDirectory("rea-entropy-window-errors-");
+  const path = join(root, "bytes");
+  await writeFile(path, Buffer.alloc(1024));
+  const service = new ByteEntropyService();
+
+  for (const input of [{ offset: 2048 }, { offset: 2048, length: 0 }]) {
+    const result = await service.inspect({ path, ...input });
+    if (result.ok) throw new Error("Expected an out-of-file offset refusal");
+    expect(projectAnalysisError(result.error).details).toMatchObject({
+      issues: [{ path: ["offset"], reason: "invalid_value" }],
+    });
+  }
+
+  const atEof = await service.inspect({ path, offset: 1024 });
+  if (!atEof.ok) throw atEof.error;
+  expect(byteEntropySchema.parse(atEof.value.normalized_result).window).toEqual(
+    {
+      offset: 1024,
+      length: 0,
+    },
+  );
+
+  const excessiveLength = await service.inspect({
+    path,
+    offset: 512,
+    length: 1024,
+  });
+  if (excessiveLength.ok)
+    throw new Error("Expected an overlong byte window refusal");
+  expect(projectAnalysisError(excessiveLength.error).details).toMatchObject({
+    issues: [{ path: ["length"], reason: "invalid_value" }],
+  });
+});
+
 it.skipIf(process.platform !== "linux")(
   "marks a generated /proc file that reports size 0 as not shown empty",
   async () => {
