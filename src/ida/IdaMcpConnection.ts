@@ -236,6 +236,14 @@ const parseIdaContentType = (
         parameters,
       });
 };
+/**
+ * Admit a declared JSON resource by media type essence: type and subtype are
+ * case-insensitive, and parameters cannot change text MCP already decoded.
+ */
+const declaresJsonResource = (mimeType: string): boolean => {
+  const mediaType = parseIdaContentType(mimeType);
+  return mediaType.ok && mediaType.value.essence === "application/json";
+};
 const httpErrorBody = (
   response: Response,
   text: string,
@@ -495,7 +503,13 @@ export const createIdaMcpConnection = (
             .array(
               z.object({
                 uri: z.literal(uri),
-                mimeType: z.literal("application/json"),
+                // MCP leaves the declaration optional.
+                mimeType: z
+                  .string()
+                  .refine(declaresJsonResource, {
+                    error: "Expected an application/json media type",
+                  })
+                  .optional(),
                 text: z.string(),
               }),
             )

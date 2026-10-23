@@ -37,6 +37,8 @@ type IdaTransportFixtureOptions = {
   readonly native?: boolean;
   readonly toolResult?: JsonValue;
   readonly resourceResponseText?: string;
+  /** `null` omits the optional resource media type. */
+  readonly resourceMimeType?: string | null;
   readonly toolRpcError?: {
     readonly code: number;
     readonly message: string;
@@ -55,6 +57,7 @@ const fixture = async ({
   native = false,
   toolResult,
   resourceResponseText,
+  resourceMimeType = "application/json",
   toolRpcError,
   toolStatus = 200,
   toolStatusText,
@@ -120,7 +123,9 @@ const fixture = async ({
                 contents: [
                   {
                     uri: "ida://idb/metadata",
-                    mimeType: "application/json",
+                    ...(resourceMimeType === null
+                      ? {}
+                      : { mimeType: resourceMimeType }),
                     text:
                       resourceResponseText ??
                       JSON.stringify({
@@ -253,6 +258,31 @@ it("reads native metadata resources and complete JSON text through the real SDK 
   });
   await expect(connection.readResource?.("ida://other")).rejects.toThrow();
   expect(methods).toContain("resources/read");
+});
+
+it.each([null, "application/json; charset=utf-8", "Application/JSON"])(
+  "reads native metadata whose optional media type is %s",
+  async (resourceMimeType) => {
+    const { connection } = await fixture({ native: true, resourceMimeType });
+    await connection.connect();
+    expect(await connection.readResource?.("ida://idb/metadata")).toMatchObject(
+      { path: "/fixture/input.i64", sha256: "a".repeat(64) },
+    );
+  },
+);
+
+it.each([
+  "text/plain",
+  "application/vnd.ida+json",
+  "application/json; charset",
+])("rejects native metadata declared as %s", async (resourceMimeType) => {
+  const { connection } = await fixture({ native: true, resourceMimeType });
+  await connection.connect();
+  await expect(
+    connection.readResource?.("ida://idb/metadata"),
+  ).rejects.toMatchObject({
+    issues: [expect.objectContaining({ path: ["contents", 0, "mimeType"] })],
+  });
 });
 
 it("accepts a legacy stdio reply over the SDK default while staying bounded", async () => {
