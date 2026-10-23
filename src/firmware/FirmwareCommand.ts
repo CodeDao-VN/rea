@@ -161,14 +161,21 @@ export const runFirmwareCommand = async (context: {
   };
   checkInterruption();
   const runId = `rea-firmware-${randomUUID()}`;
+  // RLIMIT_FSIZE applies to every regular file the producer writes, including
+  // its mandatory report and log outside the staging tree. Polling and the
+  // final inventory enforce the aggregate staging budget, so this per-file
+  // ceiling admits the largest single file either budget allows, plus one
+  // byte: a report or staged file the kernel stops at the ceiling then still
+  // exceeds its budget instead of ending exactly at it and passing as complete.
+  const fileSizeLimit =
+    Math.max(context.outputBudget?.bytes ?? 0, FIRMWARE_LIMITS.reportBytes) + 1;
   const spawned = await (context.launcher ?? spawnOwnedProviderProcess)({
     command: context.limiter,
     arguments: [
       ...prlimitArgumentVector(
         {
           address_space_bytes: FIRMWARE_LIMITS.addressSpaceBytes,
-          file_bytes:
-            context.outputBudget?.bytes ?? FIRMWARE_LIMITS.reportBytes,
+          file_bytes: fileSizeLimit,
           cpu_seconds: FIRMWARE_LIMITS.cpuSeconds,
         },
         context.command,
@@ -292,13 +299,11 @@ export const runFirmwareCommand = async (context: {
       snapshot.exitCode === 1
     )
   ) {
-    const fileSizeBytes =
-      context.outputBudget?.bytes ?? FIRMWARE_LIMITS.reportBytes;
     const fileSizeAdjustable = context.outputBudget !== undefined;
     const signalLimit = firmwareSignalLimitError(
       operation,
       snapshot.signal,
-      fileSizeBytes,
+      fileSizeLimit,
       fileSizeAdjustable,
       capturedFirmwareOutput(snapshot),
     );
@@ -314,7 +319,7 @@ export const runFirmwareCommand = async (context: {
         stdout_bytes: snapshot.stdout.bytes,
         stderr_bytes: snapshot.stderr.bytes,
       },
-      remediationAction: `Inspect exit status and stderr for format, dependency, sandbox, or resource-limit failures. ${firmwareProcessLimitRecovery(fileSizeBytes, fileSizeAdjustable)} A format or dependency failure is not repaired by changing analysis_timeout_ms.`,
+      remediationAction: `Inspect exit status and stderr for format, dependency, sandbox, or resource-limit failures. ${firmwareProcessLimitRecovery(fileSizeLimit, fileSizeAdjustable)} A format or dependency failure is not repaired by changing analysis_timeout_ms.`,
     });
   }
   return {

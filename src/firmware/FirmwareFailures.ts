@@ -29,6 +29,13 @@ import { FIRMWARE_LIMITS } from "./FirmwareRelease.js";
 export const firmwareLimitRecovery = (allowance: string): string =>
   `${allowance}. This release has no runtime override. analysis_timeout_ms (--analysis-timeout-ms in the CLI) does not raise it. Repeating the unchanged request fails the same way.`;
 
+/** Name the per-file cap extraction derives from max_output_bytes and the report budget. */
+const extractionFileSizeCap = (
+  fileSizeBytes: number,
+  scope: "extraction" | "call",
+): string =>
+  `The per-file size cap for this ${scope} is ${String(fileSizeBytes)} bytes, one byte above the larger of max_output_bytes and the ${String(FIRMWARE_LIMITS.reportBytes)}-byte report budget.`;
+
 /** Classify a prlimit signal that is not the analysis wall clock. */
 export const firmwareSignalLimitError = (
   operation: string,
@@ -64,7 +71,7 @@ export const firmwareSignalLimitError = (
   if (signal !== "SIGXFSZ") return undefined;
   return recovery(
     fileSizeAdjustable
-      ? `The file-size cap for this extraction is max_output_bytes at ${String(fileSizeBytes)} bytes. analysis_timeout_ms does not raise it. Increase max_output_bytes when it is below its schema maximum and the larger staging budget is still required. Repeating the unchanged request fails the same way.`
+      ? `${extractionFileSizeCap(fileSizeBytes, "extraction")} It also applies to the producer's report and log. analysis_timeout_ms does not raise it. Increase max_output_bytes beyond ${String(fileSizeBytes - 1)} bytes when it is below its schema maximum and a larger single file is still required. Repeating the unchanged request fails the same way.`
       : firmwareLimitRecovery(
           `The firmware file-size allowance is ${String(fileSizeBytes)} bytes`,
         ),
@@ -78,7 +85,7 @@ export const firmwareProcessLimitRecovery = (
 ): string =>
   `cpuSeconds is ${String(FIRMWARE_LIMITS.cpuSeconds)}. The address-space allowance is ${String(FIRMWARE_LIMITS.addressSpaceBytes)} bytes. This release has no runtime override for those per-process allowances, and analysis_timeout_ms does not raise them. ${
     fileSizeAdjustable
-      ? `The file-size cap for this call is max_output_bytes at ${String(fileSizeBytes)} bytes. analysis_timeout_ms does not raise it.`
+      ? `${extractionFileSizeCap(fileSizeBytes, "call")} analysis_timeout_ms does not raise it.`
       : `The file-size allowance is ${String(fileSizeBytes)} bytes. This release has no runtime override for that allowance, and analysis_timeout_ms does not raise it.`
   }`;
 
