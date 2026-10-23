@@ -131,6 +131,13 @@ import {
   createJavaScriptRecoveryProvider,
   wakaruHostSupported,
 } from "../composition/javascriptRecovery.js";
+import { registerJavaScriptDeobfuscationTool } from "./registerJavaScriptDeobfuscationTool.js";
+import { JavaScriptDeobfuscationService } from "../application/javascript/JavaScriptDeobfuscationService.js";
+import type { JavaScriptDeobfuscationPort } from "../application/javascript/JavaScriptDeobfuscationPort.js";
+import {
+  createJavaScriptDeobfuscationProvider,
+  jsRedoxHostSupported,
+} from "../composition/javascriptDeobfuscation.js";
 import { registerElectronTools } from "./registerElectronTools.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { registerEnhancedTools } from "./registerEnhancedTools.js";
@@ -228,6 +235,7 @@ export interface CreateServerOptions {
   readonly recordedCrash?: RecordedCrashService;
   readonly firmwareAnalysis?: FirmwareAnalysisPort;
   readonly javascriptRecovery?: JavaScriptRecoveryPort;
+  readonly javascriptDeobfuscation?: JavaScriptDeobfuscationPort;
   readonly webModuleTrace?: WebModuleTraceService;
   readonly webSourceLocation?: WebSourceLocationService;
   readonly webRuntime?: WebRuntimeService;
@@ -281,6 +289,7 @@ const installSessionToolAvailability = (
     pwntools: pwntoolsHostSupported(platform, arch),
     firmware: firmwareHostSupported(platform),
     javascriptRecovery: wakaruHostSupported(platform, arch),
+    javascriptDeobfuscation: jsRedoxHostSupported(platform, arch),
   };
   const pwntools =
     verifiedHost.pwntools && isAbsolute(environment.REA_PWNTOOLS_PYTHON ?? "");
@@ -323,6 +332,10 @@ const installSessionToolAvailability = (
         options.javascriptRecovery,
         verifiedHost.javascriptRecovery,
       ),
+      javascriptDeobfuscation: outsideVerifiedHost(
+        options.javascriptDeobfuscation,
+        verifiedHost.javascriptDeobfuscation,
+      ),
     },
     optionalFeatures: {
       packetCaptureEnabled:
@@ -355,6 +368,10 @@ const installSessionToolAvailability = (
         options.javascriptRecovery !== undefined ||
         (verifiedHost.javascriptRecovery &&
           isAbsolute(environment.REA_WAKARU_COMMAND ?? "")),
+      javascriptDeobfuscationEnabled:
+        options.javascriptDeobfuscation !== undefined ||
+        (verifiedHost.javascriptDeobfuscation &&
+          isAbsolute(environment.REA_JS_REDOX_COMMAND ?? "")),
       browserScenarioEnabled: options.browserScenarioCapture !== undefined,
       electronObservationEnabled: options.electronObservation !== undefined,
       electronAutomationEnabled:
@@ -468,6 +485,12 @@ export const createServer = (
     options.webNetworkCapture ?? createWebNetworkCaptureService(environment);
   const javascriptRecovery =
     options.javascriptRecovery ?? createJavaScriptRecoveryProvider(environment);
+  const javascriptDeobfuscation =
+    options.javascriptDeobfuscation ??
+    createJavaScriptDeobfuscationProvider(environment);
+  const javascriptDeobfuscationService = new JavaScriptDeobfuscationService(
+    javascriptDeobfuscation,
+  );
   const artifactResources = new ArtifactResourceScope();
   const reverseEngineering =
     createReverseEngineeringService(providerEnvironment);
@@ -485,6 +508,7 @@ export const createServer = (
     webSourceLocation,
     webModuleTrace,
     javascriptRecovery,
+    javascriptDeobfuscation,
   };
   const startedAt = options.startedAt ?? new Date().toISOString();
   const logger = options.logger ?? silentLogger;
@@ -588,6 +612,7 @@ export const createServer = (
               Promise.resolve(),
           ]),
       webRuntime.provider.close?.() ?? Promise.resolve(),
+      javascriptDeobfuscationService.close(),
       artifactResources.close(),
       reverseEngineering.close(),
       firmwareAnalysis.close(),
@@ -644,6 +669,7 @@ export const createServer = (
     electronFuses,
     pythonPyc,
     webNetworkCapture,
+    javascriptDeobfuscationService,
   };
   registerDesktopApplicationTool(
     server,
@@ -881,6 +907,7 @@ const registerConfiguredAnalysisTools = (
     pythonPyc,
     webNetworkCapture,
     artifactResources,
+    javascriptDeobfuscationService,
   }: ServerToolContext,
   android: AndroidAnalysisPort,
   wasmArtifact: Pick<WasmArtifactService, "inspect" | "close">,
@@ -1072,6 +1099,11 @@ const registerConfiguredAnalysisTools = (
     recordEvidence,
     withAdmittedAnalysis,
   );
+  registerJavaScriptDeobfuscationTool(server, javascriptDeobfuscationService, {
+    logger: toolLogger,
+    ...(recordEvidence === undefined ? {} : { recordEvidence }),
+    ...(withAdmittedAnalysis === undefined ? {} : { withAdmittedAnalysis }),
+  });
 };
 
 const createSessionRecorders = (
@@ -1108,6 +1140,7 @@ interface ServerToolContext extends ReturnType<typeof createSessionRecorders> {
   readonly electronFuses: ElectronFuseService;
   readonly pythonPyc: PythonPycService;
   readonly webNetworkCapture: WebNetworkCaptureService;
+  readonly javascriptDeobfuscationService: JavaScriptDeobfuscationService;
   readonly artifactResources: ArtifactResourceScope;
   readonly server: EvidenceMcpServer;
   readonly session: BinarySessionPort | undefined;
