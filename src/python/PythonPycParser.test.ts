@@ -1544,3 +1544,14 @@ it("leaves 3.11 alpha magics with other code layouts unsupported", () => {
     parse(pythonPycFixture("py311", { magic: 3495 })).header,
   ).toMatchObject({ python_version: "3.11", code_layout: "py311" });
 });
+
+it.each([0x73, 0x74, 0x75, 0x61, 0x41])(
+  "rejects signed-negative lengths for marshal string tag %i as malformed",
+  (tag) => {
+    for (const length of [-1, -2147483648]) {
+      expect(() =>
+        parse(withConsts([Buffer.concat([Buffer.from([tag]), i32(length)])])),
+      ).toThrow(PythonPycFormatFailure);
+    }
+  },
+);

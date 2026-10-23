@@ -461,3 +461,91 @@ cliTest("reports a truncated pyc as invalid input", async ({ cli }) => {
     details: { operation: "inspect_python_pyc" },
   });
 });
+
+cliTest(
+  "distinguishes malformed marshal string sizes from real string-budget refusals",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-python-pyc-string-size-");
+    const string = (length: number, payload = Buffer.alloc(0)) => {
+      const header = Buffer.alloc(5);
+      header[0] = 0x73;
+      header.writeInt32LE(length, 1);
+      return Buffer.concat([header, payload]);
+    };
+    const fixtures = {
+      negative: string(-1),
+      truncated: string(5, Buffer.from("ab")),
+      small: string(3, Buffer.from("abc")),
+      large: string(2 * 1024 * 1024, Buffer.alloc(2 * 1024 * 1024, 0x78)),
+    };
+    for (const [name, constant] of Object.entries(fixtures)) {
+      let bytes = Buffer.concat([
+        pythonPycHeader(3495),
+        marshalCode("py311", { consts: [constant] }),
+      ]);
+      if (name === "truncated") {
+        // End inside the declared payload rather than borrowing following code fields.
+        const at = bytes.indexOf(constant, 16);
+        expect(at).toBeGreaterThan(16);
+        bytes = bytes.subarray(0, at + constant.length);
+      }
+      await writeFile(join(root, `${name}.pyc`), bytes);
+    }
+    const scenarios = [
+      { name: "negative", options: [], outcome: "format" },
+      {
+        name: "negative",
+        options: ["--max-string-bytes", "8388608"],
+        outcome: "format",
+      },
+      { name: "truncated", options: [], outcome: "format" },
+      { name: "small", options: [], outcome: "complete" },
+      { name: "large", options: [], outcome: "resource" },
+      {
+        name: "large",
+        options: ["--max-string-bytes", "2097152"],
+        outcome: "complete",
+      },
+    ];
+    for (const { name, options, outcome } of scenarios) {
+      const result = await cli.run({
+        arguments: [
+          "inspect-python-pyc",
+          join(root, `${name}.pyc`),
+          ...options,
+          "--json",
+        ],
+      });
+      expect(result.exitCode, name).toBe(outcome === "complete" ? 0 : 1);
+      if (outcome === "complete") {
+        const report = toolContract("inspect_python_pyc").outputSchema.parse(
+          result.json,
+        ).normalized_result;
+        expect(report.coverage.status).toBe("complete");
+        expect(report.code_objects[0]?.consts[0]).toMatchObject({
+          kind: "bytes",
+          bytes: name === "small" ? 3 : 2097152,
+        });
+      } else if (outcome === "format") {
+        expect(result.json).toMatchObject({
+          code: "invalid_request",
+          category: "invalid_input",
+          details: {
+            issues: [
+              expect.objectContaining({
+                path: ["path"],
+                reason: "invalid_format",
+              }),
+            ],
+          },
+        });
+      } else {
+        expect(result.json).toMatchObject({
+          code: "resource_constraint",
+          category: "resource_constraint",
+          details: { resource: "memory" },
+        });
+      }
+    }
+  },
+);

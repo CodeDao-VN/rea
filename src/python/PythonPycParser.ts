@@ -390,13 +390,13 @@ class MarshalReader {
         return { kind: "int", value: decoded.value, bits: decoded.bits };
       }
       case TYPE_BYTES:
-        return { kind: "bytes", value: this.blob(this.u32()) };
+        return { kind: "bytes", value: this.blob(this.i32()) };
       case TYPE_INTERNED:
       case TYPE_UNICODE:
-        return this.utf8(this.u32(), false);
+        return this.utf8(this.i32(), false);
       case TYPE_ASCII:
       case TYPE_ASCII_INTERNED:
-        return this.utf8(this.u32(), true);
+        return this.utf8(this.i32(), true);
       case TYPE_SHORT_ASCII:
       case TYPE_SHORT_ASCII_INTERNED:
         return this.utf8(this.u8(), true);
@@ -1415,6 +1415,7 @@ class MarshalReader {
   }
 
   blob(length: number): Buffer {
+    if (length < 0) malformed("Marshal string length is negative.");
     if (length > this.input.max_string_bytes)
       throw new PythonPycResourceFailure(
         "string",
