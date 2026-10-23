@@ -32,7 +32,7 @@ const fixture = async (mode = "ok", failCleanup = false) => {
   await writeFile(
     script,
     `import {readFileSync, writeFileSync, chmodSync, truncateSync} from 'node:fs';
-if (process.argv.includes('--version')) { console.log(${JSON.stringify(mode)} === 'bad-version' ? 'sigrok-cli 0.7.1' : 'sigrok-cli 0.7.2\\nlibsigrokdecode 0.5.3'); console.error('version warning'); }
+if (process.argv.includes('--version')) { console.log(${JSON.stringify(mode)} === 'bad-version' ? 'sigrok-cli 0.7.1' : 'sigrok-cli 0.7.2\\nlibsigrokdecode 0.5.3'); console.error('version warning'); if (${JSON.stringify(mode)} === 'failed-version') process.exitCode = 1; }
 else if (${JSON.stringify(mode)} === 'bad-version') console.log('unexpected version fallback');
 else if (${JSON.stringify(mode)} === 'nonzero') { console.error('invalid decoder'); process.exitCode = 1; }
 else if (${JSON.stringify(mode)} === 'unknown-decoder') { console.error("srd: ModuleNotFoundError: Failed to load decoder nosuchdecoder: import by name failed: No module named 'nosuchdecoder'\\nFailed to load protocol decoder nosuchdecoder."); process.exitCode = 1; }
@@ -53,6 +53,15 @@ else { if(readFileSync('recording', 'utf8') !== 'recording bytes') throw Error('
   const configuredCommand =
     mode === "symlink" ? join(directory, "configured-tool") : script;
   if (mode === "symlink") await symlink(script, configuredCommand);
+  // A separate limiter that refuses to start the wrapped tool.
+  const limiter = join(directory, "limiter.mjs");
+  if (mode === "limiter-refused") {
+    await writeFile(
+      limiter,
+      "console.error('prlimit: failed to execute sigrok-cli'); process.exitCode = 1;\n",
+    );
+    await chmod(limiter, 0o700);
+  }
   const controller = new AbortController();
   let calls = 0;
   let mayClean = !failCleanup;
@@ -62,7 +71,8 @@ else { if(readFileSync('recording', 'utf8') !== 'recording bytes') throw Error('
     {
       ...process.env,
       REA_SIGROK_COMMAND: configuredCommand,
-      REA_SIGROK_PRLIMIT_COMMAND: configuredCommand,
+      REA_SIGROK_PRLIMIT_COMMAND:
+        mode === "limiter-refused" ? limiter : configuredCommand,
     },
     async (input) => {
       calls++;
@@ -85,7 +95,10 @@ else { if(readFileSync('recording', 'utf8') !== 'recording bytes') throw Error('
       const spawned = await spawnOwnedProviderProcess({
         ...input,
         command: process.execPath,
-        arguments: [script, ...input.arguments],
+        arguments: [
+          mode === "limiter-refused" ? limiter : script,
+          ...input.arguments,
+        ],
         expectedCommand: process.execPath,
       });
       if (mode === "wait" && !input.arguments.includes("--version"))
@@ -703,6 +716,8 @@ it("attributes discovery admission failures to discovery while sharing the decod
 
 it.each([
   "bad-version",
+  "failed-version",
+  "limiter-refused",
   "nonzero",
   "overflow",
   "line-budget",
@@ -732,6 +747,38 @@ it.each([
       stdout: "sigrok-cli 0.7.1\n",
       stderr: "version warning\n",
     });
+  if (mode === "failed-version" || mode === "limiter-refused") {
+    const decoded = await f.service.decode({ path: f.path, decoders: "uart" });
+    if (decoded.ok) throw new Error("Expected decode failure");
+    for (const error of [result.error, decoded.error]) {
+      const projected = projectAnalysisError(error);
+      expect(projected).toMatchObject({
+        code: "capability_unavailable",
+        details: {
+          captured_output:
+            mode === "failed-version"
+              ? {
+                  exit_code: 1,
+                  stdout: "sigrok-cli 0.7.2\nlibsigrokdecode 0.5.3\n",
+                  stderr: "version warning\n",
+                }
+              : {
+                  exit_code: 1,
+                  stdout: "",
+                  stderr: "prlimit: failed to execute sigrok-cli\n",
+                },
+        },
+      });
+      // The limiter wraps the probe, so the status is not attributed to sigrok-cli alone.
+      expect(projected.message).toContain(
+        "resource-limited sigrok version probe exited with status 1",
+      );
+      expect(projected.message).toContain("limiter or from sigrok-cli");
+      expect(projected.message).not.toContain("sigrok-cli --version exited");
+      expect(projected.message).toContain("REA_SIGROK_COMMAND");
+      expect(projected.message).toContain("REA_SIGROK_PRLIMIT_COMMAND");
+    }
+  }
   if (mode === "overflow") {
     expect(result.error).toBeInstanceOf(AnalysisResourceConstraintError);
     if (!(result.error instanceof AnalysisResourceConstraintError))
