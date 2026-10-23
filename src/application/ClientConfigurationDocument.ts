@@ -286,6 +286,35 @@ export const effectiveClientServer = (
     : parsed.legacyServers[name];
 
 /**
+ * The native OpenCode V2 view of a V1 document. The client loads the
+ * `mcp.servers` table from any applicable layer before a legacy `mcp` member,
+ * so once any layer has a native table, setup writes that table to keep
+ * approved configuration authoritative over inherited entries.
+ */
+export const opencodeNativeClientConfiguration = (
+  parsed: ClientConfigurationDocument,
+): ClientConfigurationDocument => {
+  if (parsed.dialect !== "opencode") return parsed;
+  const [serversKey = "mcp"] = parsed.serversPath;
+  const legacy = parsed.servers;
+  const native = legacy.servers;
+  return {
+    ...parsed,
+    servers:
+      native === undefined
+        ? {}
+        : requireObject(native, `"${serversKey}.servers"`),
+    serversPath: [serversKey, "servers"],
+    dialect: "opencode_v2",
+    legacyServers: Object.fromEntries(
+      Object.entries(legacy).filter(
+        ([name]) => !OPENCODE_V2_MCP_SETTINGS.has(name),
+      ),
+    ),
+  };
+};
+
+/**
  * Return `parsed.document` with `servers` at its server table. A legacy OpenCode
  * V1 member named in `removeLegacy` is removed beside a native V2 table.
  */

@@ -14,6 +14,7 @@ import {
   clientServerPath,
   legacyClientServerPath,
   OMP_DISABLED_SERVERS_KEY,
+  opencodeNativeClientConfiguration,
   parseClientConfiguration,
   parseZcodeFallbackConfiguration,
   serializeClientConfiguration,
@@ -136,14 +137,25 @@ const configureClientDocument = async (
       : undefined;
   if (editabilityError !== undefined)
     return { status: "failed", reason: "readback" };
+  // The effective layered registration prefers a native OpenCode V2 table from
+  // any applicable layer; write the table the client loads so approved setup
+  // overrides an inherited disabled native entry instead of adding a legacy
+  // V1 member the client will not use.
+  const nativeLayer = files.value.some(
+    ({ dialect }) => dialect === "opencode_v2",
+  );
+  const view = nativeLayer
+    ? opencodeNativeClientConfiguration
+    : (document: ClientConfigurationDocument) => document;
+  const target = existing === undefined ? undefined : view(existing);
   const policy = await readClientPolicyBlock(
     client,
-    existing,
+    target,
     await clientConfigurationDesired(
       client,
       environment,
       command,
-      existing,
+      target,
       files.value,
       resolveProviderRequestBudget,
     ),
@@ -175,6 +187,7 @@ const configureClientDocument = async (
           : "{}"),
       format,
     );
+    parsed = view(parsed);
     const policy = await readClientPolicyBlock(
       client,
       parsed,

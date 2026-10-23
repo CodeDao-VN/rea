@@ -19,6 +19,7 @@ const layeredOpenCode = async (
   cli: TestCli,
   disabled: boolean,
   jsonc: boolean,
+  upperMode: "native" | "plain" | "missing" = "native",
 ) => {
   const home = await createTestTempDirectory("rea-opencode-v2-activation-");
   const configurationHome = join(home, "config");
@@ -41,13 +42,15 @@ const layeredOpenCode = async (
     },
   });
   const originalUpper = `${jsonc ? "// Keep the user configuration comment.\n" : ""}${JSON.stringify(
-    {
-      mcp: { servers: {} },
-      theme: "system",
-    },
+    upperMode === "plain"
+      ? { theme: "system" }
+      : {
+          mcp: { servers: {} },
+          theme: "system",
+        },
   )}\n`;
   await writeFile(lower, originalLower);
-  await writeFile(upper, originalUpper);
+  if (upperMode !== "missing") await writeFile(upper, originalUpper);
   const run = (arguments_: readonly string[]) =>
     cli.run({
       arguments: arguments_,
@@ -66,70 +69,126 @@ const layeredOpenCode = async (
 
 for (const disabled of [true, false]) {
   for (const jsonc of [false, true]) {
-    cliTest(
-      `OpenCode V2 setup activates ${jsonc ? "JSONC" : "JSON"} over a lower disabled=${disabled} registration`,
-      async ({ cli }) => {
-        const fixture = await layeredOpenCode(cli, disabled, jsonc);
-        const setup = await fixture.run(setupArguments);
-        expect(setup.exitCode, setup.stdout).toBe(0);
-        expect(setup.json).toMatchObject({ status: "ready" });
-        const configured = await readFile(fixture.upper, "utf8");
-        expect(parse(configured)).toMatchObject({
-          mcp: {
-            servers: {
-              rea: {
-                type: "local",
+    for (const upperMode of ["native", "plain"] as const) {
+      cliTest(
+        `OpenCode V2 setup activates ${jsonc ? "JSONC" : "JSON"} over a lower disabled=${disabled} registration with ${
+          upperMode === "native" ? "an explicit" : "an absent"
+        } upper native table`,
+        async ({ cli }) => {
+          const fixture = await layeredOpenCode(
+            cli,
+            disabled,
+            jsonc,
+            upperMode,
+          );
+          const setup = await fixture.run(setupArguments);
+          expect(setup.exitCode, setup.stdout).toBe(0);
+          expect(setup.json).toMatchObject({ status: "ready" });
+          const configured = await readFile(fixture.upper, "utf8");
+          expect(parse(configured)).toMatchObject({
+            mcp: {
+              servers: {
+                rea: {
+                  type: "local",
+                },
               },
             },
-          },
-          theme: "system",
-        });
-        if (disabled)
-          expect(parse(configured).mcp.servers.rea.disabled).toBe(false);
-        if (jsonc)
-          expect(configured).toContain(
-            "// Keep the user configuration comment.",
+            theme: "system",
+          });
+          if (disabled)
+            expect(parse(configured).mcp.servers.rea.disabled).toBe(false);
+          if (jsonc)
+            expect(configured).toContain(
+              "// Keep the user configuration comment.",
+            );
+          expect(await readFile(fixture.lower, "utf8")).toBe(
+            fixture.originalLower,
           );
-        expect(await readFile(fixture.lower, "utf8")).toBe(
-          fixture.originalLower,
-        );
-        expect(await readFile(`${fixture.upper}.rea.backup`, "utf8")).toBe(
-          fixture.originalUpper,
-        );
+          expect(await readFile(`${fixture.upper}.rea.backup`, "utf8")).toBe(
+            fixture.originalUpper,
+          );
 
-        const repeated = await fixture.run(setupArguments);
-        expect(repeated.exitCode, repeated.stdout).toBe(0);
-        expect(repeated.json).toMatchObject({
-          status: "ready",
-          plannedActions: [],
-          appliedActions: [],
-        });
-        const doctor = await fixture.run([
-          "doctor",
-          "--client",
-          "opencode",
-          "--json",
-        ]);
-        expect(doctor.exitCode, doctor.stdout).toBe(0);
-        expect(doctor.json).toMatchObject({
-          healthy: true,
-          identity: {
-            registrations: expect.arrayContaining([
-              expect.objectContaining({ client: "opencode", state: "aligned" }),
-            ]),
-          },
-        });
-        expect(await readFile(fixture.upper, "utf8")).toBe(configured);
-        expect(await readFile(fixture.lower, "utf8")).toBe(
-          fixture.originalLower,
-        );
-        expect(
-          parse(await readFile(fixture.lower, "utf8")).mcp.servers.other,
-        ).toEqual(fixture.other);
-      },
-    );
+          const repeated = await fixture.run(setupArguments);
+          expect(repeated.exitCode, repeated.stdout).toBe(0);
+          expect(repeated.json).toMatchObject({
+            status: "ready",
+            plannedActions: [],
+            appliedActions: [],
+          });
+          const doctor = await fixture.run([
+            "doctor",
+            "--client",
+            "opencode",
+            "--json",
+          ]);
+          expect(doctor.exitCode, doctor.stdout).toBe(0);
+          expect(doctor.json).toMatchObject({
+            healthy: true,
+            identity: {
+              registrations: expect.arrayContaining([
+                expect.objectContaining({
+                  client: "opencode",
+                  state: "aligned",
+                }),
+              ]),
+            },
+          });
+          expect(await readFile(fixture.upper, "utf8")).toBe(configured);
+          expect(await readFile(fixture.lower, "utf8")).toBe(
+            fixture.originalLower,
+          );
+          expect(
+            parse(await readFile(fixture.lower, "utf8")).mcp.servers.other,
+          ).toEqual(fixture.other);
+        },
+      );
+    }
   }
 }
+
+cliTest(
+  "OpenCode V2 setup writes the native table when no upper file exists",
+  async ({ cli }) => {
+    const fixture = await layeredOpenCode(cli, true, false, "missing");
+    const setup = await fixture.run(setupArguments);
+    expect(setup.exitCode, setup.stdout).toBe(0);
+    expect(setup.json).toMatchObject({ status: "ready" });
+    const configured = await readFile(fixture.upper, "utf8");
+    expect(parse(configured)).toMatchObject({
+      mcp: {
+        servers: {
+          rea: {
+            type: "local",
+            disabled: false,
+          },
+        },
+      },
+    });
+    expect(await readFile(fixture.lower, "utf8")).toBe(fixture.originalLower);
+    const repeated = await fixture.run(setupArguments);
+    expect(repeated.exitCode, repeated.stdout).toBe(0);
+    expect(repeated.json).toMatchObject({
+      status: "ready",
+      plannedActions: [],
+      appliedActions: [],
+    });
+    const doctor = await fixture.run([
+      "doctor",
+      "--client",
+      "opencode",
+      "--json",
+    ]);
+    expect(doctor.exitCode, doctor.stdout).toBe(0);
+    expect(doctor.json).toMatchObject({
+      healthy: true,
+      identity: {
+        registrations: expect.arrayContaining([
+          expect.objectContaining({ client: "opencode", state: "aligned" }),
+        ]),
+      },
+    });
+  },
+);
 
 cliTest(
   "OpenCode V2 activation does not bypass a malformed lower configuration",
