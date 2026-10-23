@@ -84,10 +84,12 @@ import { PeResourcesProvider } from "../../src/native/pe/PeResourcesProvider.js"
 import { Il2cppMetadataProvider } from "../../src/il2cpp/Il2cppMetadataProvider.js";
 import { ElfNotesProvider } from "../../src/native/elf/ElfNotesProvider.js";
 import { PeCertificatesProvider } from "../../src/native/pe/PeCertificatesProvider.js";
+import { PeImportsProvider } from "../../src/native/pe/PeImportsProvider.js";
 import { NativeExportsProvider } from "../../src/native/exports/NativeExportsProvider.js";
 import { BeamProvider } from "../../src/erlang/BeamProvider.js";
 import { inspectElfNotesInputSchema } from "../../src/domain/native/elfNotes.js";
 import { inspectPeCertificatesInputSchema } from "../../src/domain/native/peCertificates.js";
+import { inspectPeImportsInputSchema } from "../../src/domain/native/peImports.js";
 import { inspectNativeExportsInputSchema } from "../../src/domain/native/nativeExports.js";
 import { inspectErlangBeamInputSchema } from "../../src/domain/erlang/beam.js";
 import { ModelArtifactProvider } from "../../src/model/ModelArtifactProvider.js";
@@ -700,6 +702,7 @@ const fileFailureProviders = [
   ...staticProviders,
   ["ELF notes", () => new ElfNotesProvider()],
   ["PE certificates", () => new PeCertificatesProvider()],
+  ["PE imports", () => new PeImportsProvider()],
   ["native exports", () => new NativeExportsProvider()],
   ["BEAM", () => new BeamProvider()],
   ["Python pyc", () => new PythonPycProvider()],
@@ -724,6 +727,11 @@ const inspectFileFailure = (
   if (provider instanceof PeCertificatesProvider)
     return provider.inspect(
       inspectPeCertificatesInputSchema.parse({ path }),
+      options,
+    );
+  if (provider instanceof PeImportsProvider)
+    return provider.inspect(
+      inspectPeImportsInputSchema.parse({ path }),
       options,
     );
   if (provider instanceof NativeExportsProvider)
