@@ -1,3 +1,4 @@
+import { configuredUpdateNotices } from "./UpdateNotices.js";
 import { createGpuCodeObjectsService } from "../composition/gpu.js";
 import { registerGpuCodeObjectsTools } from "./registerGpuCodeObjectsTools.js";
 import type { PacketCaptureService } from "../application/captures/PacketCaptureService.js";
@@ -496,6 +497,8 @@ export const createServer = (
       selectCompactInputSchemaPresentation(environment),
       omitOutputSchemas,
     );
+  if (options.mcpServer === undefined)
+    server.updateNotices = configuredUpdateNotices(environment);
   if (options.mcpServer !== undefined) {
     server.attachRuntime(
       session === undefined

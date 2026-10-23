@@ -49,6 +49,7 @@ import {
   measureMcpResultWithinBudget,
   TARGET_CONTENT_RESULT_META,
 } from "./toolResultEncoding.js";
+import type { UpdateNotices } from "./UpdateNotices.js";
 import { RequestTrackingMcpServer } from "./RequestTrackingMcpServer.js";
 
 export type { CompactInputSchemaPresentation } from "../contracts/compactInputSchema.js";
@@ -162,6 +163,7 @@ export interface StandardToolRegistration {
 /** Bind oversized MCP error recovery to this server's Evidence ledger. */
 export class EvidenceMcpServerCore extends RequestTrackingMcpServer {
   private identity: ReturnType<typeof createCatalogIdentity> | undefined;
+  updateNotices: UpdateNotices | undefined;
 
   /** Composition supplies identity without importing the canonical schema graph. */
   get catalogIdentity(): ReturnType<typeof createCatalogIdentity> {
@@ -222,6 +224,23 @@ export class EvidenceMcpServerCore extends RequestTrackingMcpServer {
     this.identity = identity;
   }
 
+  /** The lookup remains ours even after the SDK has discarded a closed transport. */
+  override async close(): Promise<void> {
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => super.close()),
+      this.updateNotices?.close(),
+    ]);
+    const failures = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(
+        failures,
+        "MCP server and update lookup cleanup failed",
+      );
+  }
+
   /**
    * Compact advertised input schemas and optionally omit output-schema
    * advertisements. Canonical parsers and contracts remain registered; the
@@ -280,6 +299,7 @@ export class EvidenceMcpServerCore extends RequestTrackingMcpServer {
         () => this.recordEvidence,
         () => this.delivery,
         this.omitOutputSchemas,
+        this.updateNotices,
       ),
     );
   }
@@ -309,6 +329,7 @@ class ErrorEvidenceTransport implements Transport {
       | undefined,
     private readonly currentDelivery: () => ToolResultDelivery,
     private readonly omitOutputSchemas: boolean,
+    private readonly updateNotices: UpdateNotices | undefined,
   ) {
     if (transport.hasPerRequestStream !== undefined)
       this.hasPerRequestStream = transport.hasPerRequestStream;
@@ -317,8 +338,10 @@ class ErrorEvidenceTransport implements Transport {
         isJSONRPCRequest(message) &&
         message.method === "tools/call" &&
         typeof message.params?.["name"] === "string"
-      )
+      ) {
         this.pendingTools.set(message.id, message.params["name"]);
+        this.updateNotices?.refresh();
+      }
       if (isJSONRPCRequest(message) && message.method === "tools/list")
         this.pendingToolLists.add(message.id);
       if (isJSONRPCRequest(message) && message.method === "completion/complete")
@@ -350,6 +373,7 @@ class ErrorEvidenceTransport implements Transport {
     };
     transport.onerror = (error) => this.onerror?.(error);
     transport.onclose = () => {
+      void this.updateNotices?.close();
       this.pendingTools.clear();
       this.pendingToolLists.clear();
       for (const completion of this.pendingCompletions.values())
@@ -372,7 +396,10 @@ class ErrorEvidenceTransport implements Transport {
 
   async close(): Promise<void> {
     try {
-      await this.transport.close();
+      await Promise.all([
+        Promise.resolve().then(() => this.transport.close()),
+        this.updateNotices?.close(),
+      ]);
     } finally {
       this.pendingTools.clear();
       this.pendingToolLists.clear();
@@ -430,7 +457,11 @@ class ErrorEvidenceTransport implements Transport {
               }
             : result;
         await this.transport.send({ ...advertised, result: marked }, options);
-      } else await this.transport.send(advertised, options);
+      } else
+        await this.transport.send(
+          this.withUpdateNotice(advertised, tool),
+          options,
+        );
     } finally {
       if (!isJSONRPCRequest(message) && id !== undefined) {
         forgetPendingMcpRequest(
@@ -441,6 +472,33 @@ class ErrorEvidenceTransport implements Transport {
         );
       }
     }
+  }
+
+  private withUpdateNotice(
+    message: JSONRPCMessage,
+    tool: string | undefined,
+  ): JSONRPCMessage {
+    if (
+      tool === undefined ||
+      !isJSONRPCResultResponse(message) ||
+      !isCallToolResult(message.result)
+    )
+      return message;
+    const notice = this.updateNotices?.peek();
+    if (notice === undefined) return message;
+    const result = {
+      ...message.result,
+      content: [
+        ...message.result.content,
+        { type: "text" as const, text: notice.text },
+      ],
+    };
+    if (
+      !measureMcpResultWithinBudget(result, this.delivery.resultBudgetBytes).ok
+    )
+      return message;
+    this.updateNotices?.acknowledge(notice.version);
+    return { ...message, result };
   }
 
   private recoverError(
