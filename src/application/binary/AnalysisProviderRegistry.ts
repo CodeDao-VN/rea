@@ -78,6 +78,8 @@ export interface AnalysisProviderBinding {
   readonly selectionSource: "request" | "environment" | "auto-single-candidate";
   readonly profile: AnalysisProfileCommitment;
   readonly createClient?: AnalysisProviderBoundClientFactory;
+  /** Provider-private connection identity; never serialized. */
+  readonly bindingKey?: string;
   /** The provider's capabilities, attributed to its resolved identity. */
   readonly capabilities: readonly CapabilityDescriptor[];
 }
@@ -797,6 +799,7 @@ const selectedResult = (
   evaluated: AnalysisProviderCandidateEvaluation & {
     readonly profile: AnalysisProfileCommitment;
     readonly createClient?: AnalysisProviderBoundClientFactory;
+    readonly bindingKey?: string;
   },
   statuses: readonly AnalysisProviderCandidateStatus[],
 ): AnalysisProviderSelection => {
@@ -821,6 +824,9 @@ const selectedResult = (
       ...(evaluated.createClient === undefined
         ? {}
         : { createClient: evaluated.createClient }),
+      ...(evaluated.bindingKey === undefined
+        ? {}
+        : { bindingKey: evaluated.bindingKey }),
       capabilities,
     },
     candidates: replaceCandidate(statuses, selectedStatus),

@@ -206,6 +206,12 @@ export interface AnalysisProfileResolution {
   readonly profile: AnalysisProfileCommitment | null;
   /** Keep provider-private facts bound to this selection without Evidence serialization. */
   readonly createClient?: AnalysisProviderBoundClientFactory;
+  /**
+   * Provider-private identity of the live connection settings, such as
+   * credentials the public profile withholds. Never serialized; a change starts
+   * a new client even when the public profile is equal.
+   */
+  readonly bindingKey?: string;
 }
 
 export type AnalysisProviderBoundClientFactory = (

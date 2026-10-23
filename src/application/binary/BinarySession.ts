@@ -555,10 +555,13 @@ export class BinarySession
         }),
       );
     const activeProfile = this.#active?.profile;
+    // A provider-private binding key covers connection settings the public
+    // profile withholds, such as a rotated credential.
     const sameProfile =
-      activeProfile === null || activeProfile === undefined
+      (activeProfile === null || activeProfile === undefined
         ? profile === null
-        : profile !== null && analysisProfilesEqual(activeProfile, profile);
+        : profile !== null && analysisProfilesEqual(activeProfile, profile)) &&
+      this.#active?.route.binding?.bindingKey === route.binding?.bindingKey;
     await this.#drainCalls(admittedThrough);
     if (isAborted(options.signal))
       return err(

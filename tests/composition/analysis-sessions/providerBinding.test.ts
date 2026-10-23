@@ -192,6 +192,39 @@ describe("target-bound provider routing", () => {
 });
 
 describe("selected provider capability provenance", () => {
+  it("starts a new client when only the provider-private binding key changes", async () => {
+    const target = await databaseTarget();
+    const alpha = deepProvider("alpha");
+    alpha.bindingKey = "connection-settings-first";
+    const session = selectableSession([alpha.provider]);
+
+    const openAndExecute = async () => {
+      expect((await session.open(target, { providerId: "alpha" })).ok).toBe(
+        true,
+      );
+      expect(
+        (await session.execute("address_name", { address: "0x1" })).ok,
+      ).toBe(true);
+    };
+
+    await openAndExecute();
+    await openAndExecute();
+    // Equal profile and binding key: the live client is retained.
+    expect(alpha.clients).toHaveLength(1);
+
+    // A rotated credential changes only the private key, not the profile.
+    alpha.bindingKey = "connection-settings-second";
+    await openAndExecute();
+    expect(alpha.clients).toHaveLength(2);
+    expect(alpha.clients[0]?.closed).toBe(true);
+    expect(alpha.clients[1]?.closed).toBe(false);
+    // The key never reaches serialized session state.
+    expect(JSON.stringify(await session.status())).not.toContain(
+      "connection-settings",
+    );
+    await session.close();
+  });
+
   it("labels selected-provider capabilities with the resolved identity", async () => {
     const target = await databaseTarget();
     const alpha = deepProvider("alpha");
@@ -235,6 +268,8 @@ interface DeepProviderFixture {
   fail: boolean;
   profileResolutions: number;
   pending: Promise<ReturnType<typeof successfulExecution>> | undefined;
+  /** Provider-private connection identity returned with the profile. */
+  bindingKey: string | undefined;
 }
 
 const deepProvider = (id: string): DeepProviderFixture => {
@@ -249,6 +284,7 @@ const deepProvider = (id: string): DeepProviderFixture => {
     fail: false,
     profileResolutions: 0,
     pending: undefined,
+    bindingKey: undefined,
   };
   const provider: AnalysisProviderCandidate = {
     identity: () => identity,
@@ -281,6 +317,9 @@ const deepProvider = (id: string): DeepProviderFixture => {
             { id, name: identity.name, version: "1" },
             { provider: id },
           ),
+          ...(fixture.bindingKey === undefined
+            ? {}
+            : { bindingKey: fixture.bindingKey }),
         }),
       );
     },

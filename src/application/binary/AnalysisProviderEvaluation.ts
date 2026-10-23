@@ -24,6 +24,7 @@ export interface AnalysisProviderCandidateEvaluation {
   readonly status: AnalysisProviderCandidateStatus;
   readonly profile?: AnalysisProfileCommitment;
   readonly createClient?: AnalysisProviderBoundClientFactory;
+  readonly bindingKey?: string;
   readonly profileError?: AnalysisError;
 }
 
@@ -113,9 +114,7 @@ export const evaluateAnalysisProviderCandidate = async (
       candidate,
       status,
       profile,
-      ...(resolved.value.createClient === undefined
-        ? {}
-        : { createClient: resolved.value.createClient }),
+      ...providerPrivateBinding(resolved.value),
     });
   } catch (cause: unknown) {
     void cause;
@@ -151,4 +150,16 @@ const rejectedProfile = (
       }),
     },
   },
+});
+
+/** Carry the provider's private client factory and binding key, when present. */
+const providerPrivateBinding = ({
+  createClient,
+  bindingKey,
+}: {
+  readonly createClient?: AnalysisProviderBoundClientFactory;
+  readonly bindingKey?: string;
+}) => ({
+  ...(createClient === undefined ? {} : { createClient }),
+  ...(bindingKey === undefined ? {} : { bindingKey }),
 });

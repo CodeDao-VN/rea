@@ -94,7 +94,7 @@ The headless profile supports upstream's **database supervisor** API: `idb_open`
 }
 ```
 
-Use an already-installed executable. When required by your existing idalib installation, include `"env": { "IDADIR": "/absolute/path/to/ida" }`. REA neither edits the global activation configuration nor installs dependencies. A configured local Streamable HTTP supervisor can instead use `"url": "http://127.0.0.1:8745/mcp"` and `"mode": "headless"`.
+Use an already-installed executable. When required by your existing idalib installation, include `"env": { "IDADIR": "/absolute/path/to/ida" }`. If a header or environment entry holds a credential, list its name in `"sensitive": ["NAME"]` so its value is kept out of the analysis profile; every listed name must be an entry of that registration's `headers` (HTTP) or `env` (stdio). REA neither edits the global activation configuration nor installs dependencies. A configured local Streamable HTTP supervisor can instead use `"url": "http://127.0.0.1:8745/mcp"` and `"mode": "headless"`.
 
 The same CLI commands work in both modes. For a Windows-native REA process:
 
@@ -156,7 +156,7 @@ The legacy profile additionally supports direct callers. Its producer may report
 
 Complete body ranges, typed reference edges, CFG, referenced data, source locals, comment kinds, and database revision are unavailable. Empty unsupported dossier facets mean **unknown**, not observed absence. Whole-symbol inventory, mutation, debugging, arbitrary Python forwarding, and requested GUI navigation are outside this adapter's coverage. Check session availability before composing a workflow that needs those facets.
 
-`provider.version` identifies the REA adapter; the profile explicitly records `version_scope: "rea-ida-adapter"`. The MCP handshake's `serverInfo` is separate and does not establish IDA or Python distribution versions. Raw observations preserve producer metadata and output. Attached hashes identify the recorded original input; headless identity uses the digest-verified private copy and observed worker input path. Neither proves source-code recovery or an unmodified analysis database.
+`provider.version` identifies the REA adapter; the profile explicitly records `version_scope: "rea-ida-adapter"`. The MCP handshake's `serverInfo` is separate and does not establish IDA or Python distribution versions. The profile's `registration_digest` is a SHA-256 of the canonical registration. Values of the HTTP `headers` or stdio `env` entries named in the registration's optional `sensitive` list are replaced by a fixed marker first, so rotating such a credential keeps the digest; every other value, every name and the `sensitive` list itself stay committed, so a changed `IDADIR` or routing header gives a different profile. REA still compares the complete registration privately before reusing a live IDA connection, so a rotated credential reconnects with the new value without ever entering the profile, Evidence or logs. Raw observations preserve producer metadata and output. Attached hashes identify the recorded original input; headless identity uses the digest-verified private copy and observed worker input path. Neither proves source-code recovery or an unmodified analysis database.
 
 ## Verification
 
