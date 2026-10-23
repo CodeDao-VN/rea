@@ -19,6 +19,7 @@ import {
   type AnalysisViewResult,
 } from "./analysisView.js";
 import { EnvironmentStateAccumulator } from "./EnvironmentStateAccumulator.js";
+import type { ObservedEntity } from "./environmentStateMerge.js";
 import {
   at,
   identityCandidates,
@@ -26,6 +27,7 @@ import {
   type JsonObject,
 } from "./environmentStateRules.js";
 import { environmentStateFields } from "./environmentStateView.js";
+import { lineShapes } from "./environmentStateVariants.js";
 
 type State = Extract<AnalysisViewResult, { kind: "environment-state" }>;
 const ALL_RULES = [
@@ -196,7 +198,7 @@ it("keeps the latest value of a field that changed with no related write and nam
   );
 });
 
-it("leaves a type recorded when a value changed across a write under another root", () => {
+it("ends a type's state at a write under another root its value changed across", () => {
   const state = stateOf(
     captureOf([
       ["GET", "/api/search", [{ id: 1, title: "Granite Ledger" }]],
@@ -204,16 +206,16 @@ it("leaves a type recorded when a value changed across a write under another roo
       ["GET", "/api/search", [{ id: 1, title: "Saltmarsh Depot" }]],
     ]),
   );
-  expect(state.types).toEqual([]);
-  expect(state.entities).toEqual([]);
-  expect(viewOf(state, "get_search")).toEqual({
-    tool: "get_search",
-    shape: "recorded",
-    reason: "fields-differ",
-  });
+  expect(state.types).toMatchObject([
+    { collection_template: "/api/search", init_before_ordinal: 1 },
+  ]);
+  expect(state.entities).toMatchObject([
+    { id: "1", fields: { title: "Granite Ledger" } },
+  ]);
+  expect(viewOf(state, "get_search")).toMatchObject({ shape: "list" });
 });
 
-it("leaves a type recorded when a value changed across a write already in flight", () => {
+it("leaves out of a type's state a read made while the write its value changed across was in flight", () => {
   const exchange = ([method, path, seconds, time, title]: readonly [
     string,
     string,
@@ -254,7 +256,7 @@ it("leaves a type recorded when a value changed across a write already in flight
   expect(viewOf(state, "get_search")).toEqual({
     tool: "get_search",
     shape: "recorded",
-    reason: "fields-differ",
+    reason: "no-init-recording",
   });
 });
 
@@ -756,6 +758,71 @@ it("refuses when extraction would exceed the projection budget", () => {
   });
 });
 
+it("counts the line shapes it builds against the budget as it builds them", () => {
+  const members = Object.fromEntries(
+    Array.from({ length: 40 }, (_, index) => [
+      `member_with_a_long_name_${String(index)}`,
+      index,
+    ]),
+  );
+  const entities: ObservedEntity[] = Array.from({ length: 50 }, (_, id) => ({
+    type: "/api/items",
+    collection: "/api/items",
+    id: String(id),
+    order: [0, id],
+    observations: [1, 2].map((ordinal) => ({
+      position: ordinal,
+      ordinal,
+      tool: "get_items",
+      item: false,
+      object: members,
+    })),
+  }));
+  let retained = 0;
+  lineShapes(entities, (bytes) => {
+    retained += bytes;
+  });
+  // Each of the hundred observations keeps its entity's key and the names of its members.
+  expect(retained).toBeGreaterThan(100 * Object.keys(members).join(",").length);
+});
+
+it("releases a planning pass a rewrite cut discards before extracting the state again", () => {
+  const recipe = (id: number, views: number) => ({
+    id,
+    name: `Recipe ${String(id)} simmered slowly with a long descriptive title`,
+    views,
+  });
+  const shelf = Array.from({ length: 400 }, (_, index) => recipe(index + 1, 1));
+  // Logging a view bumps the counter only when `views` changes, which cuts the type's reads at the log.
+  const capture = (views: number) =>
+    captureOf([
+      ["GET", "/api/recipes", shelf],
+      ["GET", "/api/recipes/1", recipe(1, 1)],
+      ["POST", "/api/view-log", { ok: true }, 200, { recipe: 1 }],
+      ["GET", "/api/recipes/1", recipe(1, views)],
+    ]);
+  const fits = (parent: AnalysisViewParent, bytes: number): boolean =>
+    projectAnalysisView(
+      parent,
+      { kind: "environment-state", template_rules: [...ALL_RULES] },
+      { state: new EnvironmentStateAccumulator(bytes, [...ALL_RULES]) },
+    ).ok;
+  /** The smallest allowance, to a KiB, the capture's state projects within. */
+  const allowance = (parent: AnalysisViewParent): number => {
+    let [low, high] = [0, 8 * 1024];
+    while (high - low > 1) {
+      const middle = Math.floor((low + high) / 2);
+      if (fits(parent, middle * 1024)) high = middle;
+      else low = middle;
+    }
+    return high * 1024;
+  };
+  expect(stateOf(capture(2)).types).toMatchObject([
+    { collection_template: "/api/recipes", init_before_ordinal: 2 },
+  ]);
+  expect(allowance(capture(2))).toBeLessThan(allowance(capture(1)) + 16 * 1024);
+});
+
 it("ends every type's state at a write whose URL was redacted, and says so", () => {
   const parent = captureOf([
     ["GET", "/api/items/1", { id: 1, title: "Granite Ledger" }],
@@ -839,7 +906,7 @@ it("does not take a later recording that is itself an entity as the list", () =>
   expect(state.entities).toEqual([]);
 });
 
-it("leaves a type recorded when two of its tools read different values across a write", () => {
+it("ends a type's state at a write two of its tools read different values across", () => {
   const state = stateOf(
     captureOf([
       ["GET", "/api/search", [{ id: 1, title: "Granite Ledger" }]],
@@ -847,16 +914,17 @@ it("leaves a type recorded when two of its tools read different values across a 
       ["GET", "/api/search/1", { id: 1, title: "Saltmarsh Depot" }],
     ]),
   );
-  expect(state.types).toEqual([]);
-  expect(state.entities).toEqual([]);
+  expect(state.types).toMatchObject([
+    { collection_template: "/api/search", init_before_ordinal: 1 },
+  ]);
+  expect(state.entities).toMatchObject([
+    { id: "1", fields: { title: "Granite Ledger" } },
+  ]);
   expect(
     state.views.map((view) =>
       view.shape === "recorded" ? [view.tool, view.reason] : view.tool,
     ),
-  ).toEqual([
-    ["get_search", "fields-differ"],
-    ["get_search_by_id", "fields-differ"],
-  ]);
+  ).toEqual(["get_search", ["get_search_by_id", "no-init-recording"]]);
 });
 
 it.each(["old", "new"])(
@@ -871,14 +939,9 @@ it.each(["old", "new"])(
       ]),
     );
     if (title === "new") {
-      expect(state.types).toEqual([]);
-      expect(state.entities).toEqual([]);
-      expect(
-        state.views.every(
-          (view) =>
-            view.shape === "recorded" && view.reason === "fields-differ",
-        ),
-      ).toBe(true);
+      expect(state.types).toMatchObject([{ init_before_ordinal: 1 }]);
+      expect(state.entities[0]?.fields.title).toBe("old");
+      expect(viewOf(state, "get_search")).toMatchObject({ shape: "list" });
     } else {
       expect(viewOf(state, "get_search_by_id")).toMatchObject({
         shape: "item",
@@ -978,7 +1041,7 @@ it.each([
   [[{ id: 1 }], []],
   [[{ id: 1 }], [{ id: 2 }]],
 ] as const)(
-  "keeps changed list membership across another root's write recorded (%j -> %j)",
+  "ends a list's state at another root's write its membership changed across (%j -> %j)",
   (before, after) => {
     const state = stateOf(
       captureOf([
@@ -987,12 +1050,15 @@ it.each([
         ["GET", "/api/search", [...after]],
       ]),
     );
-    expect(state.types).toEqual([]);
-    expect(state.entities).toEqual([]);
-    expect(viewOf(state, "get_search")).toEqual({
-      tool: "get_search",
-      shape: "recorded",
-      reason: "fields-differ",
+    // An empty initial list proves no identity, so it is held as a document.
+    expect(state.types.map((type) => type.init_before_ordinal)).toEqual(
+      before.length > 0 ? [1] : [],
+    );
+    expect(state.entities.map((entity) => entity.id)).toEqual(
+      before.map((item) => String(item.id)),
+    );
+    expect(viewOf(state, "get_search")).toMatchObject({
+      shape: before.length > 0 ? "list" : "document",
     });
   },
 );
@@ -1114,7 +1180,7 @@ it.each([
   [{ id: 1 }, { id: 1, title: "Created" }],
   [{ id: 1, title: "Original" }, { id: 1 }],
 ])(
-  "keeps fields added or removed across another root's write recorded (%j -> %j)",
+  "ends a type's state at another root's write it gained or lost fields across (%j -> %j)",
   (before, after) => {
     const state = stateOf(
       captureOf([
@@ -1123,11 +1189,10 @@ it.each([
         ["GET", "/api/search/1", after],
       ]),
     );
-    expect(state.types).toEqual([]);
-    expect(state.entities).toEqual([]);
+    expect(state.types).toMatchObject([{ init_before_ordinal: 1 }]);
+    expect(state.entities).toMatchObject([{ fields: before }]);
     expect(viewOf(state, "get_search_by_id")).toMatchObject({
-      shape: "recorded",
-      reason: "fields-differ",
+      shape: "item",
     });
   },
 );

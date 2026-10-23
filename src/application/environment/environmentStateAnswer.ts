@@ -1,9 +1,7 @@
-import { environmentToolArguments } from "./environmentTools.js";
 import { stateBodyJson } from "../../domain/analysisView/EnvironmentStateAccumulator.js";
 import {
   collectionMatch,
   collectionPathOf,
-  isProjectionParameter,
   decodedSegment,
   allLines,
   listItems,
@@ -22,6 +20,7 @@ import {
   type StateView,
 } from "../../domain/analysisView/environmentStateRules.js";
 import { pageBound } from "../../domain/analysisView/environmentStatePaging.js";
+import { replayReason } from "../../domain/analysisView/environmentStateVariants.js";
 import { isAbsence } from "../../domain/analysisView/environmentStateWriteChecks.js";
 import {
   evaluateQuery,
@@ -66,7 +65,8 @@ export type StateProvenance =
         | "no-view"
         | "unrecorded-request"
         | "page-exceeded"
-        | "projection";
+        | "projection"
+        | "variant";
     }
   | {
       readonly source: "state";
@@ -147,16 +147,16 @@ const fromRecording = (
     : replayed;
 };
 
-/** Whether a call names a projection parameter of an item view with projected reads, which the state's whole entities cannot answer. */
-const asksProjection = (
-  view: StateItemView,
-  tool: EnvironmentManifestTool,
-  args: ReplayArguments,
-): boolean =>
-  view.projected_record_ordinals !== undefined &&
-  [...environmentToolArguments(tool).query].some(
-    ([name, argument]) =>
-      isProjectionParameter(name) && args[argument] !== undefined,
+/** Why a call replays the view's replayed reads, or undefined when the state answers it. */
+const replayedCall = (
+  source: EnvironmentSource,
+  view: StateItemView | StateListView,
+  call: ReadonlyMap<string, string>,
+): "projection" | "variant" | undefined =>
+  replayReason(
+    view,
+    new Map([...call].map(([name, value]) => [name, [value]])),
+    (ordinal) => source.exchanges.get(ordinal)?.query,
   );
 
 /** A recorded body the state renders into, usable exactly when extraction could use it. */
@@ -306,9 +306,10 @@ const answerItem = (
       collection: `/${call.segments.map(({ text }) => text).join("/")}`,
       id: call.id,
     });
-  // A projection of an entity the state holds replays as the capture's projected reads did.
-  if (asksProjection(view, tool, args))
-    return fromRecording(source, tool, args, "projection");
+  // A projection or another representation of an entity the state holds replays as the capture's reads did.
+  const replayed = replayedCall(source, view, callQuery(tool, args));
+  if (replayed !== undefined)
+    return fromRecording(source, tool, args, replayed);
   const shown = shownEntity(
     tool,
     view,
@@ -476,6 +477,12 @@ const answerCheckedLine = (
   view: StateListView | StateDocumentView,
   args: ReplayArguments,
 ): Result<StateAnswer, AnalysisError> => {
+  const replayed =
+    view.shape === "list"
+      ? replayedCall(serving.source, view, callQuery(tool, args))
+      : undefined;
+  if (replayed !== undefined)
+    return fromRecording(serving.source, tool, args, replayed);
   const named = checkedLine(
     serving.source,
     tool,
