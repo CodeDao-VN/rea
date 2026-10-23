@@ -4,7 +4,6 @@ import {
   type HostRestrictedFeature,
 } from "../application/CapabilityInventory.js";
 import type { OptionalProviderLoadFailures } from "../application/OptionalObservationProviders.js";
-import { platform } from "node:process";
 
 export interface SessionAvailabilityDefaults {
   readonly optionalProviderLoadFailures?:
@@ -59,7 +58,7 @@ export const sessionAvailabilityPolicy = (
         defaults.optionalFeatures?.wasmArtifactEnabled ?? false,
       evmInterfaceEnabled:
         defaults.optionalFeatures?.evmInterfaceEnabled ?? false,
-      processCaptureEnabled: platform !== "win32",
+      processCaptureEnabled: true,
       recordedCrashEnabled:
         defaults.optionalFeatures?.recordedCrashEnabled ?? false,
       binaryLayoutEnabled:
