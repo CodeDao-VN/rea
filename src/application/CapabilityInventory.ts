@@ -55,6 +55,7 @@ type ProviderDescriptor = ProviderCapability;
 /** Optional integrations whose verified hosts exclude some platforms. */
 export const HOST_RESTRICTED_FEATURES = [
   "packetCapture",
+  "pcapCapture",
   "signalRecording",
   "evmInterface",
   "binaryLayout",
@@ -498,6 +499,15 @@ const workflowAvailabilityFor = ({
       "packetCapture",
       policy.packetCaptureEnabled,
       "On Linux, supply TShark 4.x on PATH or through absolute REA_TSHARK_COMMAND, and util-linux prlimit (REA_TSHARK_PRLIMIT_COMMAND, default /usr/bin/prlimit). No active binary target or hardware is required; the tool is checked at execution.",
+    );
+  // The pcap family registers on every host; only the capture bound is
+  // host-restricted, and the client version probe stays host-independent.
+  if (name === "inspect_pcap_capture")
+    return hostRestrictedAvailability(
+      policy,
+      "pcapCapture",
+      true,
+      "Packet summaries require an enforceable native memory bound: Linux with util-linux prlimit, or Windows with owned Job Objects. This host's capture boundary remains unsupported.",
     );
   if (name === "decode_signal_recording" || name === "inspect_signal_decoders")
     return hostRestrictedAvailability(

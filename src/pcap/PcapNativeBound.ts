@@ -14,6 +14,14 @@ const PRLIMIT_COMMAND_ENV = "REA_TSHARK_PRLIMIT_COMMAND";
 /** Capture CPU ceiling, in seconds. */
 const PCAP_CPU_SECONDS = 300;
 
+/**
+ * Packet summaries need an enforceable native memory bound: Linux with
+ * util-linux prlimit, or Windows with owned Job Objects; discovery and
+ * execution share this check.
+ */
+export const pcapCaptureHostSupported = (platform: NodeJS.Platform): boolean =>
+  platform === "linux" || platform === "win32";
+
 /** Own native capture admission and the exact enforced resource profile. */
 export const preparePcapNativeBound = async (
   environment: Readonly<Record<string, string | undefined>>,
@@ -22,6 +30,16 @@ export const preparePcapNativeBound = async (
   nativeBound: NonNullable<Parameters<typeof runPcapCommand>[0]["nativeBound"]>;
   limitations: readonly string[];
 }> => {
+  if (!pcapCaptureHostSupported(process.platform)) {
+    const reason =
+      "Packet summaries require an enforceable native memory bound: Linux with util-linux prlimit, or Windows with owned Job Objects. This host's capture boundary remains unsupported.";
+    throw new AnalysisCapabilityUnavailableError(
+      "pcap",
+      "inspect_pcap_capture",
+      reason,
+      { userMessage: reason },
+    );
+  }
   if (process.platform === "win32") {
     return {
       nativeBound: {
@@ -31,16 +49,6 @@ export const preparePcapNativeBound = async (
         "Each owned Windows tool tree has a 1 GiB Job Object committed-memory limit; this is not a machine-wide quota.",
       ],
     };
-  }
-  if (process.platform !== "linux") {
-    const reason =
-      "Packet summaries require an enforceable native memory bound: Linux with util-linux prlimit, or Windows with owned Job Objects. This host's capture boundary remains unsupported.";
-    throw new AnalysisCapabilityUnavailableError(
-      "pcap",
-      "inspect_pcap_capture",
-      reason,
-      { userMessage: reason },
-    );
   }
   const configured = environment[PRLIMIT_COMMAND_ENV] ?? "/usr/bin/prlimit";
   try {

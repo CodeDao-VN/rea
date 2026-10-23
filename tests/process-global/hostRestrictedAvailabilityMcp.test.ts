@@ -16,6 +16,7 @@ import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
 const HOST_RESTRICTED_TOOLS = [
   ["inspect_packet_capture", "linux"],
   ["inspect_packet_fields", "linux"],
+  ["inspect_pcap_capture", "linux-or-win32"],
   ["decode_signal_recording", "linux"],
   ["inspect_signal_decoders", "linux"],
   ["inspect_firmware_regions", "linux"],
@@ -124,6 +125,7 @@ it.each([
   ["darwin", "arm64"],
   ["linux", "arm64"],
   ["linux", "x64"],
+  ["win32", "x64"],
 ] as const)(
   "reports host-restricted integrations on %s %s by host before configuration",
   async (platform, arch) =>
@@ -133,7 +135,10 @@ it.each([
         const availability = await harness.availability();
         for (const [name, requirement] of HOST_RESTRICTED_TOOLS) {
           const supported =
-            platform === "linux" && (requirement === "linux" || arch === "x64");
+            requirement === "linux-or-win32"
+              ? platform === "linux" || platform === "win32"
+              : platform === "linux" &&
+                (requirement === "linux" || arch === "x64");
           const entry = availability.find((tool) => tool.name === name);
           if (!supported)
             expect(entry, name).toMatchObject({

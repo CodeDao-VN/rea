@@ -164,7 +164,10 @@ import type { FlutterBuildAnalysisPort } from "../application/flutter/FlutterBui
 import { FlutterBuildAnalysisService } from "../application/flutter/FlutterBuildAnalysisService.js";
 import { createAndroidAnalysisProvider } from "../composition/android.js";
 import { createApktoolResourceAnalysisProvider } from "../composition/apktool.js";
-import { createPcapAnalysisProvider } from "../composition/pcap.js";
+import {
+  createPcapAnalysisProvider,
+  pcapCaptureHostSupported,
+} from "../composition/pcap.js";
 import { createFlutterBuildAnalysisProvider } from "../composition/flutter.js";
 import type { JebAnalysisPort } from "../application/jeb/JebAnalysisPort.js";
 import { createJebAnalysisProvider } from "../composition/jeb.js";
@@ -281,6 +284,7 @@ const installSessionToolAvailability = (
     pwntools: pwntoolsHostSupported(platform, arch),
     firmware: firmwareHostSupported(platform),
     javascriptRecovery: wakaruHostSupported(platform, arch),
+    pcapCapture: pcapCaptureHostSupported(platform),
   };
   const pwntools =
     verifiedHost.pwntools && isAbsolute(environment.REA_PWNTOOLS_PYTHON ?? "");
@@ -322,6 +326,10 @@ const installSessionToolAvailability = (
       javascriptRecovery: outsideVerifiedHost(
         options.javascriptRecovery,
         verifiedHost.javascriptRecovery,
+      ),
+      pcapCapture: outsideVerifiedHost(
+        options.pcapAnalysis,
+        verifiedHost.pcapCapture,
       ),
     },
     optionalFeatures: {

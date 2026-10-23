@@ -263,6 +263,24 @@ describe("capability failure reasons", () => {
     if (remediation === null) expect(availability.remediation).toBeNull();
     else expect(availability.remediation).toContain(remediation);
   });
+
+  it("reports pcap capture summaries unsupported off their verified hosts", () => {
+    const inventory = buildCapabilityInventory(status(), {
+      ...enabledPolicy,
+      hostUnsupported: { pcapCapture: true },
+    });
+    expect(
+      inventory.find(({ name }) => name === "inspect_pcap_capture"),
+    ).toMatchObject({
+      available: false,
+      reason: "unsupported_host",
+      remediation:
+        "Packet summaries require an enforceable native memory bound: Linux with util-linux prlimit, or Windows with owned Job Objects. This host's capture boundary remains unsupported.",
+    });
+    expect(
+      inventory.find(({ name }) => name === "inspect_pcap_client"),
+    ).toMatchObject({ available: true, reason: "available" });
+  });
 });
 
 describe("compact tool availability", () => {
