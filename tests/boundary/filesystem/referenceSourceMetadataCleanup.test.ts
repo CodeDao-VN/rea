@@ -1,10 +1,16 @@
-import { mkdir, open as fsOpen, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  open as fsOpen,
+  writeFile,
+  type FileHandle,
+} from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 
 import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
 import { importReferenceSource } from "../../../src/application/ReferenceSourceImport.js";
+import { projectReferenceSourceImportError } from "../../../src/application/ReferenceSourceImportTypes.js";
 import { readReferenceSourceVcs } from "../../../src/application/ReferenceSourceVcsAdapter.js";
 import { execFileOutput } from "../../../src/process/ExecFileOutput.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
@@ -123,7 +129,72 @@ it("retains failed .gitignore cleanup under the caller's scope", async () => {
   expect(close.calls()).toBe(3);
 });
 
-it("preserves Git metadata cleanup failure and the completed source read", async () => {
+it("retains Git config descriptor ownership when closing ignore metadata fails", async () => {
+  const root = await createTestTempDirectory("rea-reference-git-config-owner-");
+  await execFileOutput("git", ["init", "--initial-branch=main"], { cwd: root });
+  const path = join(root, ".git", "config");
+  const resources = new ArtifactResourceScope();
+  const close = failCloseUntilAllowed(path);
+  onTestFinished(async () => {
+    close.allow();
+    await resources.close().catch(() => undefined);
+  });
+
+  const result = await readReferenceSourceVcs(root, resources);
+  expect(result).toMatchObject({
+    ok: false,
+    error: {
+      code: "io",
+      cleanup: {
+        resources: [path],
+        reason: expect.stringContaining("injected metadata close failure"),
+      },
+    },
+  });
+  expect(close.calls()).toBe(2);
+
+  close.allow();
+  await resources.close();
+  expect(close.calls()).toBe(3);
+});
+
+it("preserves cancellation during the owned Git config read", async () => {
+  const root = await createTestTempDirectory(
+    "rea-reference-git-config-cancel-",
+  );
+  await execFileOutput("git", ["init", "--initial-branch=main"], { cwd: root });
+  const path = join(root, ".git", "config");
+  const controller = new AbortController();
+  const reason = new Error("cancel Git config observation");
+  const nativeOpen = actual.open;
+  openMock.mockImplementation(async (...args) => {
+    const handle = await nativeOpen(...args);
+    if (resolve(String(args[0])) !== resolve(path)) return handle;
+    const read = handle.read.bind(handle);
+    vi.spyOn(handle, "read").mockImplementation(async (...readArgs) => {
+      if (!controller.signal.aborted) controller.abort(reason);
+      return read(...readArgs);
+    });
+    return handle;
+  });
+  const resources = new ArtifactResourceScope();
+  onTestFinished(() => resources.close());
+
+  const result = await readReferenceSourceVcs(
+    root,
+    resources,
+    controller.signal,
+  );
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Expected Git config cancellation");
+  expect(result.error.code).toBe("cancelled");
+  expect(result.error.cause).toMatchObject({
+    reason: "cancelled",
+    cause: reason,
+  });
+});
+
+it("blocks reference inventory while Git metadata cleanup remains pending", async () => {
   const root = await createTestTempDirectory("rea-reference-head-owner-");
   const repository = join(root, "repository");
   const sourceRoot = join(root, "source");
@@ -160,22 +231,13 @@ it("preserves Git metadata cleanup failure and the completed source read", async
         resources: [head],
         reason: expect.stringContaining("injected metadata close failure"),
       },
-      partial: {
-        entries: [
-          {
-            kind: "file",
-            path: "main.ts",
-            bytes: Buffer.from(bytes),
-          },
-        ],
-      },
     },
   });
-  expect(close.calls()).toBe(2);
+  expect(close.calls()).toBe(3);
 
   close.allow();
   await resources.close();
-  expect(close.calls()).toBe(3);
+  expect(close.calls()).toBe(4);
 });
 
 it("retains later packed-ref cleanup after an earlier loose-ref read failure", async () => {
@@ -283,3 +345,115 @@ it("keeps a later packed-ref read error primary over earlier loose-ref cleanup",
     Array.from({ length: looseCloseCalls.size }, () => 3),
   );
 });
+
+const importFailureCases = [
+  { primary: "io", recover: false, policyFailure: false },
+  { primary: "cancelled", recover: false, policyFailure: false },
+  { primary: "io", recover: true, policyFailure: true },
+  { primary: "cancelled", recover: true, policyFailure: false },
+] as const;
+
+const failureCauses = (cause: unknown): readonly unknown[] => [
+  cause,
+  ...(typeof cause === "object" && cause !== null && "cause" in cause
+    ? failureCauses(cause.cause)
+    : []),
+  ...(cause instanceof AggregateError
+    ? cause.errors.flatMap((error: unknown) => failureCauses(error))
+    : []),
+];
+
+it.each(importFailureCases)(
+  "preserves $primary when metadata cleanup recovery is $recover before policy preparation",
+  async ({ primary, recover, policyFailure }) => {
+    const root = await createTestTempDirectory("rea-reference-import-primary-");
+    await execFileOutput("git", ["init", "--initial-branch=main"], {
+      cwd: root,
+    });
+    const head = join(root, ".git", "HEAD");
+    const policy = join(root, ".gitignore");
+    await writeFile(policy, "generated/\n");
+    const controller = new AbortController();
+    const primaryCause = Object.assign(
+      new Error(`primary metadata ${primary}`),
+      {
+        code: "EIO",
+      },
+    );
+    const policyCause = Object.assign(new Error("later policy read failure"), {
+      code: "EACCES",
+    });
+    const resources = new ArtifactResourceScope();
+    const handles: FileHandle[] = [];
+    let allowClose = false;
+    let closeCalls = 0;
+    let policyOpened = false;
+    openMock.mockImplementation(async (...args) => {
+      const path = resolve(String(args[0]));
+      if (path === policy) {
+        policyOpened = true;
+        if (policyFailure) throw policyCause;
+      }
+      const handle = await actual.open(...args);
+      if (path !== head) return handle;
+      handles.push(handle);
+      const read = handle.read.bind(handle);
+      vi.spyOn(handle, "read").mockImplementation(async (...readArgs) => {
+        if (primary === "io") throw primaryCause;
+        const observed = await read(...readArgs);
+        controller.abort(primaryCause);
+        return observed;
+      });
+      const close = handle.close.bind(handle);
+      vi.spyOn(handle, "close").mockImplementation(async () => {
+        closeCalls += 1;
+        if (!allowClose && !(recover && closeCalls >= 3))
+          throw new Error("secondary metadata close failure");
+        await close();
+      });
+      return handle;
+    });
+    onTestFinished(async () => {
+      allowClose = true;
+      await resources.close();
+    });
+
+    const result = await importReferenceSource(
+      {
+        root,
+        caller: "reference-source-primary-failure-test",
+        policy: { secretPatterns: [] },
+        signal: controller.signal,
+      },
+      resources,
+    );
+    if (result.ok) throw new Error("Expected the metadata failure to survive");
+    expect(result.error.code).toBe(primary);
+    expect(result.error.message).toContain(
+      "Git metadata could not be read safely",
+    );
+    if (primary === "io")
+      expect(result.error.message).toContain(primaryCause.message);
+    expect(failureCauses(result.error.cause)).toContain(primaryCause);
+    expect(result.error.cleanup).toMatchObject({
+      resources: [head],
+      reason: expect.stringContaining("secondary metadata close failure"),
+    });
+    expect(projectReferenceSourceImportError(result.error).category).toBe(
+      primary === "cancelled" ? "cancelled" : "execution_failure",
+    );
+    expect(policyOpened).toBe(policyFailure);
+    if (policyFailure)
+      expect(result.error.message).toContain(policyCause.message);
+    expect(resources.hasPending).toBe(!recover);
+    expect(handles).toHaveLength(1);
+    expect(handles[0]?.fd === -1).toBe(recover);
+    expect(closeCalls).toBe(3);
+
+    allowClose = true;
+    await resources.close();
+    expect(resources.hasPending).toBe(false);
+    expect(handles[0]?.fd).toBe(-1);
+    expect(closeCalls).toBe(recover ? 3 : 4);
+  },
+);

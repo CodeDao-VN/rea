@@ -378,11 +378,52 @@ other facts. No fixed output-size or runtime improvement is promised.
 The import records hashes and metadata for the supplied files, separately
 from observations of the current app. For a directory inside a Git checkout,
 it records the HEAD of the nearest enclosing repository; whether the working
-tree matches that commit remains unknown. It honors the source tree's `.gitignore`
-and applies default exclusions for common generated and dependency paths such
-as `node_modules/`, `dist/`, and `*.log`. Pattern-based exclusions record the
+tree matches that commit remains unknown. Linked-worktree HEAD parsing removes
+Git's ASCII separator and trailing padding while preserving legal Unicode
+whitespace in branch names. Directory-pointer whitespace remains significant.
+HEAD remains unknown when a ref record has misplaced leading ASCII padding or
+the reference library would trim Unicode whitespace from its identity.
+It loads `.gitignore` files inside the
+selected root as it enters each directory. Child rules apply within that directory
+and can override inherited project rules; excluded directories are not traversed.
+Ignore files above the selected root and Git's global excludes are not loaded.
+Project rules match UTF-8 bytes, so `?` consumes one byte rather than one
+Unicode character. Bracket expressions include Git's ASCII POSIX named classes
+(such as `[[:digit:]]`), ranges and negation; no class consumes a path separator.
+A literal slash inside a class still anchors that rule to its policy directory.
+They use the locally observed `core.ignoreCase` setting;
+insensitive matching folds ASCII letters only, so `é` does not exclude `É`.
+Local Boolean settings accept Git's textual forms and portable decimal, octal
+and hexadecimal integers with optional `k`, `m` or `g` multipliers. A NUL byte
+ends the parsed value, but invalid quote or escape syntax after it still leaves
+the setting unknown. Binary prefixes and the signed minimum `-2147483648`
+(including hexadecimal, octal and multiplied forms) depend on the Git version
+or build and remain unknown.
+If the setting cannot be
+determined, the importer uses the insensitive fallback and records that
+uncertainty in the graph's limitations. A project-policy line ends at its first
+NUL byte, as in Git; the recorded pattern retains that effective prefix. Original
+paths remain unchanged in the evidence. Caller and secret patterns retain their
+own matching semantics, including NUL handling.
+Nested ignore files explicitly marked sensitive are skipped before their contents
+are read; their configured-secret exclusions are recorded during inventory.
+If a nested policy's entry kind cannot be determined, sensitive patterns are
+checked against both file and directory forms. A match skips the policy read;
+inventory records unknown entry kind if metadata remains unavailable.
+Other child ignore files must be readable regular UTF-8 files. A policy-read failure
+stops the import and retains the inventory already captured. CLI `partial.entries`
+includes the observed directory's failed state, and `partial.exclusions` retains
+exclusions already observed before the failure. Files read before failure retain
+`bytes` as JSON `{ "type": "Buffer", "data": [...] }`.
+Default exclusions for common generated and dependency paths such as
+`node_modules/`, `dist/`, and `*.log` still apply after project rules, followed by
+caller exclusions. Pattern-based exclusions record the
 matched pattern and whether it came from project, default, caller, or sensitive
-path policy. Links into excluded paths retain their internal target metadata;
+path policy. Project exclusions also record `policy_path`, the supplying
+`.gitignore` path relative to the selected root (for example, `.gitignore` or
+`packages/app/.gitignore`). This identifies the rule's directory scope without
+rewriting the recorded pattern. Other exclusion reasons do not carry this field.
+Links into excluded paths retain their internal target metadata;
 the exclusion explains why the target has no inventory entry, and the inventory
 remains partial. Exclusions record `entry_kind` when the importer observed it;
 older saved exclusions without that field have unknown kind. An excluded
@@ -390,6 +431,13 @@ ancestor proves an internal descendant only when its kind is `directory`.
 Set `REA_REFERENCE_SECRET_PATTERNS_JSON` to a JSON array of ignore
 patterns when you want to mark selected paths as sensitive; those patterns are
 reported separately as configured-secret exclusions.
+
+Saved graphs without `policy_path` remain readable with their existing hashes;
+the policy source stays unknown. Re-import to capture it. The field participates
+in new graph and manifest commitments, so adding or changing it changes those
+hashes. Older strict readers reject graphs containing this field: upgrade the
+reader before consuming newly imported graphs. The source path does not preserve
+the complete ordered policy or make the exclusion replayable by itself.
 
 Re-import saved graphs whose pattern-based exclusions lack `pattern` before
 using them in source-to-bundle comparisons.

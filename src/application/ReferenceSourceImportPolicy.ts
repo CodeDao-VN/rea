@@ -1,3 +1,4 @@
+import type { Stats } from "node:fs";
 import { lstat, realpath, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
@@ -9,6 +10,11 @@ import {
 } from "./RegularFileRead.js";
 
 import { err, ok, type Result } from "../domain/result.js";
+import type { HistoricalSourceGraphInput } from "../domain/referenceSourceGraph.js";
+import type {
+  ReferenceSourceExclusionKind,
+  ReferenceSourceExclusionPolicy,
+} from "../reference/ReferenceSourceReaderTypes.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import {
@@ -16,7 +22,10 @@ import {
   type ReferenceSourceImportError,
   type ReferenceSourceImportOptions,
 } from "./ReferenceSourceImportTypes.js";
-import { rootFilesystemFailure } from "../reference/ReferenceSourceReaderErrors.js";
+import {
+  filesystemFailureDetail,
+  rootFilesystemFailure,
+} from "../reference/ReferenceSourceReaderErrors.js";
 import {
   RegularFileCleanupFailure,
   regularFileCancellation,
@@ -25,8 +34,8 @@ import {
 /** Validated inputs ready for filesystem traversal. */
 export interface PreparedReferenceSourceImport {
   readonly root: string;
-  readonly ignored: ReturnType<typeof ignore>;
-  readonly secrets: ReturnType<typeof ignore>;
+  readonly policy: ReferenceSourceExclusionPolicy;
+  readonly limitations: readonly string[];
 }
 
 const failure = (
@@ -59,17 +68,360 @@ const ignorePolicyCause = (cause: unknown): unknown =>
 
 const isAborted = (signal?: AbortSignal): boolean => signal?.aborted === true;
 
+type IgnoreReason = "project-ignored" | "default-ignored" | "caller-excluded";
+
+// Project wildcards consume UTF-8 bytes, whereas caller/secret patterns use
+// JavaScript characters. Latin-1 gives each byte one matcher character while
+// preserving ASCII separators and syntax; source evidence never uses this form.
+const gitByteString = (value: string): string =>
+  Buffer.from(value, "utf8").toString("latin1");
+
+// Hex atoms survive ignore's wildcard rewrites, including its terminal-star
+// rewrite. Encode both range endpoints with uppercase hex so its textual
+// range sanitizer cannot mistake their suffixes for a descending range.
+const literalIgnoreAtom = (character: string, inClass: boolean): string => {
+  const code = character.charCodeAt(0);
+  const atom = `\\x${code.toString(16).toUpperCase().padStart(2, "0")}`;
+  return inClass ? atom : `[${atom}]`;
+};
+
+// Git folds ASCII bytes, not JavaScript's Unicode case pairs. Keep filenames
+// and evidence unchanged; only matcher inputs use this representation.
+const foldGitCase = (value: string): string =>
+  value.replace(/[A-Z]/gu, (letter) => letter.toLowerCase());
+
+// Git's character predicates are ASCII byte tables, independent of locale.
+// In particular, its space class excludes vertical tab and form feed.
+const gitNamedClassRanges: Readonly<
+  Record<string, readonly (readonly [number, number])[]>
+> = {
+  alnum: [
+    [48, 57],
+    [65, 90],
+    [97, 122],
+  ],
+  alpha: [
+    [65, 90],
+    [97, 122],
+  ],
+  blank: [
+    [9, 9],
+    [32, 32],
+  ],
+  cntrl: [
+    [0, 31],
+    [127, 127],
+  ],
+  digit: [[48, 57]],
+  graph: [[33, 126]],
+  lower: [[97, 122]],
+  print: [[32, 126]],
+  punct: [
+    [33, 47],
+    [58, 64],
+    [91, 96],
+    [123, 126],
+  ],
+  space: [
+    [9, 10],
+    [13, 13],
+    [32, 32],
+  ],
+  upper: [[65, 90]],
+  xdigit: [
+    [48, 57],
+    [65, 70],
+    [97, 102],
+  ],
+};
+
+const gitClassRange = (lower: number, upper: number): string => {
+  if (lower > upper) return "";
+  // Classes cannot consume a path separator, even when a named class or a
+  // numeric range contains its byte. Hex encoding also keeps regex syntax inert.
+  if (lower <= 47 && upper >= 47)
+    return gitClassRange(lower, 46) + gitClassRange(48, upper);
+  const from = literalIgnoreAtom(String.fromCharCode(lower), true);
+  return lower === upper
+    ? from
+    : `${from}-${literalIgnoreAtom(String.fromCharCode(upper), true)}`;
+};
+
+/** Parse Git classes in order: named sets and ranges reset the range endpoint. */
+const normalizeGitClass = (
+  pattern: string,
+  start: number,
+  ignoreCase: boolean,
+) => {
+  let index = start + 1;
+  const negative = pattern[index] === "!" || pattern[index] === "^";
+  if (negative) index += 1;
+  let text = "";
+  let previous: string | undefined;
+  let first = true;
+  for (; index < pattern.length; index += 1) {
+    let character = pattern[index]!;
+    if (character === "]" && !first) {
+      const end = index + 1;
+      return {
+        text: `[${negative ? "!" : ""}${text}${negative ? "\\x2F" : ""}]`,
+        end,
+      };
+    }
+    first = false;
+    if (character === "\\") {
+      index += 1;
+      if (index === pattern.length) break;
+      character = pattern[index]!;
+    } else if (
+      character === "-" &&
+      previous !== undefined &&
+      pattern[index + 1] !== undefined &&
+      pattern[index + 1] !== "]"
+    ) {
+      index += 1;
+      if (pattern[index] === "\\") index += 1;
+      if (index === pattern.length) break;
+      const endpoint = pattern[index]!;
+      const lower = previous.charCodeAt(0);
+      const upper = endpoint.charCodeAt(0);
+      // The preceding literal was already added, so descending ranges keep
+      // that member. Git folds range comparisons but not individual members.
+      text += gitClassRange(lower, upper);
+      const asciiLower = Math.max(lower, 65);
+      const asciiUpper = Math.min(upper, 90);
+      if (ignoreCase) text += gitClassRange(asciiLower + 32, asciiUpper + 32);
+      previous = undefined;
+      continue;
+    } else if (character === "[" && pattern[index + 1] === ":") {
+      const close = pattern.indexOf("]", index + 2);
+      if (close === -1) break;
+      if (close > index + 2 && pattern[close - 1] === ":") {
+        const name = pattern.slice(index + 2, close - 1);
+        const ranges = Object.hasOwn(gitNamedClassRanges, name)
+          ? gitNamedClassRanges[name]
+          : undefined;
+        // A syntactically complete but unknown class invalidates the whole
+        // rule, including a negated rule; it is not an empty member set.
+        if (ranges === undefined)
+          return { text: undefined, end: pattern.length };
+        for (const [lower, upper] of ranges)
+          text += gitClassRange(lower, upper);
+        if (ignoreCase && name === "upper") text += gitClassRange(97, 122);
+        index = close;
+        previous = undefined;
+        continue;
+      }
+      // Without the closing colon, Git treats '[' as an ordinary member and
+      // the first ']' closes the outer class. Do not consume the suffix here.
+    }
+    if (character !== "/") text += literalIgnoreAtom(character, true);
+    previous = character;
+  }
+  return { text: undefined, end: pattern.length };
+};
+
+/** Project policies normalize Git quoting; caller/secret rules keep their syntax. */
+const normalizeIgnorePattern = (
+  sourcePattern: string,
+  gitEscapes = false,
+  ignoreCase = false,
+): { readonly text: string; readonly anchored: boolean } => {
+  const pattern = gitEscapes
+    ? sourcePattern.replace(
+        /((?:\\\\)*?)(\\? +)$/u,
+        (_match, pairs: string, trailing: string) =>
+          pairs + (trailing.startsWith("\\") ? "\\ " : ""),
+      )
+    : sourcePattern;
+  // Git decides directory scope from raw separators before interpreting classes
+  // or escapes. Keep that fact after encoding a slash-bearing class as bytes.
+  const body = pattern.startsWith("!") ? pattern.slice(1) : pattern;
+  const anchored = body.startsWith("/") || body.slice(0, -1).includes("/");
+  let result = "";
+  let inClass = false;
+  let classFirst = false;
+  let classAllowsInitialClose = false;
+  for (let index = 0; index < pattern.length;) {
+    const character = pattern[index]!;
+    if (gitEscapes && character === "[") {
+      const characterClass = normalizeGitClass(pattern, index, ignoreCase);
+      if (characterClass.text === undefined) return { text: "", anchored };
+      result += characterClass.text;
+      index = characterClass.end;
+      continue;
+    }
+    if (character === "\\") {
+      let end = index;
+      while (pattern[end] === "\\") end += 1;
+      const count = end - index;
+      const next = pattern[end];
+      if (gitEscapes) {
+        result += literalIgnoreAtom("\\", false).repeat(Math.floor(count / 2));
+        if (count % 2 === 1) {
+          // Git removes a terminal directory separator before matching. An
+          // odd escape run there leaves a dangling escape, which never matches.
+          if (
+            next === undefined ||
+            (next === "/" && end === pattern.length - 1)
+          )
+            return { text: "", anchored };
+          // A quoted internal separator still separates path components in Git.
+          result += next === "/" ? "/" : literalIgnoreAtom(next, false);
+          index = end + 1;
+        } else index = end;
+        continue;
+      }
+      if (next !== undefined && /\s/u.test(next) && next !== " ") {
+        result += "\\".repeat(count - (count % 2));
+        result += inClass ? next : `[${next}]`;
+        index = end + 1;
+        continue;
+      }
+      result += pattern.slice(index, end);
+      if (next !== undefined && count % 2 === 1) {
+        result += next;
+        if (inClass) {
+          classFirst = false;
+          classAllowsInitialClose = false;
+        }
+        index = end + 1;
+        continue;
+      }
+      index = end;
+      continue;
+    }
+    if (inClass) {
+      if (classFirst && (character === "!" || character === "^")) {
+        result += character;
+        classFirst = false;
+        index += 1;
+        continue;
+      }
+      if (classAllowsInitialClose && character === "]") {
+        result += character;
+        classFirst = false;
+        classAllowsInitialClose = false;
+        index += 1;
+        continue;
+      }
+      if (
+        character === "[" &&
+        [":", ".", "="].includes(pattern[index + 1] ?? "")
+      ) {
+        const close = `${pattern[index + 1]}]`;
+        const end = pattern.indexOf(close, index + 2);
+        if (end !== -1) {
+          result += pattern.slice(index, end + 2);
+          index = end + 2;
+          classFirst = false;
+          continue;
+        }
+      }
+      if (character === "]") inClass = false;
+      else {
+        classFirst = false;
+        classAllowsInitialClose = false;
+      }
+      result += character;
+      index += 1;
+      continue;
+    }
+    if (character === "[") {
+      inClass = true;
+      classFirst = true;
+      classAllowsInitialClose = true;
+    }
+    if (!inClass && character !== " " && /\s/u.test(character))
+      result += `[${character}]`;
+    else
+      result += gitEscapes && ignoreCase ? foldGitCase(character) : character;
+    index += 1;
+  }
+  return { text: result, anchored };
+};
+
+/** Scope Git patterns once while retaining their original text for evidence. */
+const scopedPattern = (
+  sourcePattern: string,
+  prefix: string | undefined,
+  projectPolicy: boolean,
+  ignoreCase: boolean,
+): string | undefined => {
+  const normalized = normalizeIgnorePattern(
+    projectPolicy ? gitByteString(sourcePattern) : sourcePattern,
+    projectPolicy,
+    ignoreCase,
+  );
+  // Git's terminal directory globstar consumes a descendant. Caller/default
+  // rules retain the dependency's existing zero-depth directory match.
+  const pattern = projectPolicy
+    ? normalized.text.replace(/(^!?|\/)\*\*\/(?= *$)/u, "$1**/*/")
+    : normalized.text;
+  if (prefix === undefined && (!projectPolicy || !normalized.anchored))
+    return pattern;
+  if (pattern.length === 0 || /^ *$/u.test(pattern) || pattern.startsWith("#"))
+    return undefined;
+  const negative = pattern.startsWith("!");
+  const body = negative ? pattern.slice(1) : pattern;
+  if (body === "" || body === "/") return undefined;
+  const scope = prefix === undefined ? "" : `${prefix}/`;
+  const descendants = normalized.anchored ? "" : "**/";
+  return `${negative ? "!" : ""}/${scope}${descendants}${body.replace(/^\//u, "")}`;
+};
+
 const addMarkedPatterns = (
   matcher: ReturnType<typeof ignore>,
   patterns: readonly string[],
-  mark: "project-ignored" | "default-ignored" | "caller-excluded",
+  reason: IgnoreReason,
+  directory = ".",
+  ignoreCase = false,
 ): void => {
-  for (const pattern of patterns)
-    for (const line of pattern.split(/\r?\n/u))
-      matcher.add({ pattern: line, mark });
+  // The reader lends this matcher only to this directory's descendants.
+  // Consume that known prefix by depth: literal filenames can contain glob
+  // metacharacters that ignore cannot safely escape (notably ? and \\).
+  const prefix =
+    directory === "."
+      ? undefined
+      : directory
+          .split("/")
+          .map(() => "*")
+          .join("/");
+  const policyPath =
+    reason === "project-ignored"
+      ? directory === "."
+        ? ".gitignore"
+        : `${directory}/.gitignore`
+      : "";
+  for (const pattern of patterns) {
+    // Only the start of a policy file can contain an encoding signature.
+    const projectPolicy = reason === "project-ignored";
+    const text = projectPolicy ? pattern.replace(/^\uFEFF/u, "") : pattern;
+    for (const rawLine of text.split(projectPolicy ? /\n/u : /\r?\n/u)) {
+      let line = rawLine;
+      if (projectPolicy) {
+        // Git removes the physical line's terminal CR before interpreting its
+        // NUL-terminated pattern. A CR immediately before an embedded NUL is
+        // literal; bytes after that NUL cannot change the effective rule.
+        line = line.replace(/\r$/u, "");
+        const terminator = line.indexOf("\0");
+        if (terminator !== -1) line = line.slice(0, terminator);
+      }
+      const scoped = scopedPattern(line, prefix, projectPolicy, ignoreCase);
+      if (scoped !== undefined)
+        matcher.add({
+          pattern: scoped,
+          mark: `${reason}\u0000${policyPath}\u0000${line}`,
+        });
+    }
+  }
+  // This directory has already been admitted by the inherited policy.
+  // Scoped wildcards must not exclude it retroactively and block descendant
+  // negations through ignore's parent checks.
+  if (prefix !== undefined) matcher.add(`!/${prefix}/`);
 };
 
-const resolveRoot = async (
+export const resolveReferenceSourceRoot = async (
   requestedRoot: string,
   signal?: AbortSignal,
 ): Promise<Result<string, ReferenceSourceImportError>> => {
@@ -102,38 +454,66 @@ const resolveRoot = async (
   }
 };
 
-const buildIgnored = async (
-  root: string,
-  excludePaths: readonly string[],
-  resources: ArtifactResourceScope,
-  signal?: AbortSignal,
-): Promise<Result<ReturnType<typeof ignore>, ReferenceSourceImportError>> => {
-  const ignored = ignore();
-  const policyPath = join(root, ".gitignore");
-  let present = true;
+const ignorePolicyMetadata = async (
+  path: string,
+): Promise<Result<Stats | undefined, ReferenceSourceImportError>> => {
   try {
-    await lstat(policyPath);
+    return ok(await lstat(path));
   } catch (cause: unknown) {
     if (
-      !(
-        typeof cause === "object" &&
-        cause !== null &&
-        "code" in cause &&
-        cause.code === "ENOENT"
-      )
+      typeof cause === "object" &&
+      cause !== null &&
+      "code" in cause &&
+      cause.code === "ENOENT"
     )
-      throw cause;
-    present = false;
+      return ok(undefined);
+    const message = filesystemFailureDetail(
+      cause,
+      `Reference source ignore policy could not be read at ${path}`,
+    );
+    if (message === undefined) throw cause;
+    return err({ ...failure("io", message), cause });
   }
-  if (signal?.aborted === true)
-    throw new IgnorePolicyReadCancelled(signal.reason);
-  if (present) {
-    let text: string;
+};
+
+interface IgnorePolicyReadOptions {
+  readonly signal: AbortSignal | undefined;
+  readonly symlinks: "follow" | "reject";
+  readonly isSensitive?: (kind: ReferenceSourceExclusionKind) => boolean;
+}
+
+const readIgnorePolicy = async (
+  root: string,
+  resources: ArtifactResourceScope,
+  { signal, symlinks, isSensitive }: IgnorePolicyReadOptions,
+): Promise<Result<string, ReferenceSourceImportError>> => {
+  const policyPath = join(root, ".gitignore");
+  try {
+    const metadata = await ignorePolicyMetadata(policyPath);
+    if (signal?.aborted === true)
+      throw new IgnorePolicyReadCancelled(signal.reason);
+    // Metadata failures leave kind unknown, just as in ordinary inventory.
+    // Only explicitly sensitive policies may bypass this failure.
+    if (!metadata.ok) {
+      if (isSensitive?.("unknown")) return ok("");
+      return metadata;
+    }
+    // Sensitive policies are omitted before opening or decoding their contents.
+    // The reader records the exclusion once, with the observed entry kind.
+    if (
+      metadata.value === undefined ||
+      isSensitive?.(metadata.value.isDirectory() ? "directory" : "file")
+    )
+      return ok("");
     try {
-      text = await readRegularFileText(policyPath, {
-        signal,
-        cancellationFailure: (reason) => new IgnorePolicyReadCancelled(reason),
-      });
+      return ok(
+        await readRegularFileText(policyPath, {
+          signal,
+          symlinks,
+          cancellationFailure: (reason) =>
+            new IgnorePolicyReadCancelled(reason),
+        }),
+      );
     } catch (cause: unknown) {
       if (cause instanceof IgnorePolicyReadCancelled) throw cause;
       if (!(cause instanceof RegularFileCleanupFailure)) throw cause;
@@ -165,55 +545,87 @@ const buildIgnored = async (
           throw new IgnorePolicyReadCancelled(operationCancellation.reason);
         throw retry.outcome.cause;
       }
-      text = retry.outcome.value;
+      if (isAborted(signal))
+        throw new IgnorePolicyReadCancelled(signal?.reason);
+      return ok(retry.outcome.value);
     }
-    addMarkedPatterns(ignored, [text], "project-ignored");
+  } catch (cause: unknown) {
+    const causeValue = ignorePolicyCause(cause);
+    return err({
+      ...failure(
+        isIgnorePolicyCancellation(cause) ? "cancelled" : "io",
+        `Reference source ignore policy could not be read at ${policyPath}: ${errorMessage(causeValue)}`,
+      ),
+      cause: causeValue,
+    });
   }
-  addMarkedPatterns(
-    ignored,
-    DEFAULT_REFERENCE_SOURCE_IGNORE_PATTERNS,
-    "default-ignored",
-  );
-  for (const path of excludePaths) {
-    addMarkedPatterns(ignored, [path, `${path}/`], "caller-excluded");
-  }
-  return ok(ignored);
 };
 
 /** Resolve the caller-selected directory and build path filters. */
 export const prepareReferenceSourceImport = async (
   options: ReferenceSourceImportOptions,
   resources: ArtifactResourceScope,
+  exclusions: HistoricalSourceGraphInput["exclusions"] = [],
+  ignoreCase: boolean | null = false,
+  canonicalRoot?: string,
 ): Promise<
   Result<PreparedReferenceSourceImport, ReferenceSourceImportError>
 > => {
   try {
     return await resources.run(async () => {
-      const root = await resolveRoot(options.root, options.signal);
+      const root =
+        canonicalRoot === undefined
+          ? await resolveReferenceSourceRoot(options.root, options.signal)
+          : ok(canonicalRoot);
       if (!root.ok) return root;
-      try {
-        const ignored = await buildIgnored(
-          root.value,
-          options.excludePaths ?? [],
-          resources,
-          options.signal,
-        );
-        if (!ignored.ok) return ignored;
-        return ok({
+      const policy = await readIgnorePolicy(root.value, resources, {
+        signal: options.signal,
+        symlinks: "follow",
+      });
+      if (!policy.ok) return policy;
+      // If Git's local setting cannot be read, use the broader matcher and
+      // retain that uncertainty in graph limitations below.
+      const project = ignore({ ignoreCase: false });
+      addMarkedPatterns(
+        project,
+        [policy.value],
+        "project-ignored",
+        ".",
+        ignoreCase ?? true,
+      );
+      const overrides = ignore();
+      addMarkedPatterns(
+        overrides,
+        DEFAULT_REFERENCE_SOURCE_IGNORE_PATTERNS,
+        "default-ignored",
+      );
+      for (const path of options.excludePaths ?? [])
+        addMarkedPatterns(overrides, [path, `${path}/`], "caller-excluded");
+      const secrets = ignore();
+      for (const pattern of options.policy.secretPatterns)
+        secrets.add({
+          pattern: normalizeIgnorePattern(pattern).text,
+          mark: pattern,
+        });
+      return ok({
+        root: root.value,
+        limitations:
+          ignoreCase === null
+            ? [
+                "Effective Git core.ignoreCase is unknown; project ignore matching used case-insensitive rules.",
+              ]
+            : [],
+        policy: createExclusionPolicy(project, {
           root: root.value,
-          ignored: ignored.value,
-          secrets: ignore().add([...options.policy.secretPatterns]),
-        });
-      } catch (cause: unknown) {
-        const causeValue = ignorePolicyCause(cause);
-        return err({
-          ...failure(
-            isIgnorePolicyCancellation(cause) ? "cancelled" : "io",
-            `Reference source ignore policy could not be read at ${join(root.value, ".gitignore")}: ${errorMessage(causeValue)}`,
-          ),
-          cause: causeValue,
-        });
-      }
+          ignoreCase,
+          overrides,
+          ignoredOverrides: new Map(),
+          secrets,
+          exclusions,
+          resources,
+          signal: options.signal,
+        }),
+      });
     });
   } catch (cause: unknown) {
     if (!(cause instanceof ArtifactReaderFailure)) throw cause;
@@ -230,3 +642,160 @@ export const prepareReferenceSourceImport = async (
 
 const errorMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
+
+interface ExclusionPolicyContext {
+  readonly root: string;
+  readonly ignoreCase: boolean | null;
+  readonly overrides: ReturnType<typeof ignore>;
+  readonly ignoredOverrides: Map<number, ReturnType<typeof ignore>>;
+  readonly secrets: ReturnType<typeof ignore>;
+  readonly exclusions: HistoricalSourceGraphInput["exclusions"];
+  readonly resources: ArtifactResourceScope;
+  readonly signal: AbortSignal | undefined;
+}
+
+/** Each pending directory keeps its own inherited rules; siblings never share writes. */
+const createExclusionPolicy = (
+  project: ReturnType<typeof ignore>,
+  context: ExclusionPolicyContext,
+): ReferenceSourceExclusionPolicy => {
+  const { root, overrides, secrets, exclusions, resources, signal } = context;
+  const policy: ReferenceSourceExclusionPolicy = {
+    shouldExclude: createShouldExclude(exclusions, secrets, {
+      test: (path) => {
+        const bytes = gitByteString(path);
+        const projectMatch = project.test(
+          context.ignoreCase === false ? bytes : foldGitCase(bytes),
+        );
+        if (!projectMatch.ignored) {
+          const override = overrides.test(path);
+          return override.ignored || override.unignored
+            ? override
+            : projectMatch;
+        }
+        // ignore skips positive rules until a negation changes an already
+        // ignored result. Seed that state at this depth, leaving admitted
+        // ancestors alone, so duplicate positives keep the project evidence.
+        const depth = path.split("/").filter(Boolean).length;
+        let matcher = context.ignoredOverrides.get(depth);
+        if (matcher === undefined) {
+          matcher = ignore()
+            .add({
+              pattern: `/${Array<string>(depth).fill("*").join("/")}`,
+              mark: "",
+            })
+            .add(overrides);
+          context.ignoredOverrides.set(depth, matcher);
+        }
+        const override = matcher.test(path);
+        return override.rule?.mark === "" ? projectMatch : override;
+      },
+    }),
+    prepareDirectory: async (directory) => {
+      // Root admission already read its policy before any inventory or VCS work.
+      if (directory === ".") return ok(policy);
+      const text = await readIgnorePolicy(join(root, directory), resources, {
+        signal,
+        symlinks: "reject",
+        isSensitive: (kind) =>
+          matchIgnorePath(secrets, `${directory}/.gitignore`, kind)?.ignored ===
+          true,
+      });
+      if (!text.ok)
+        return err({
+          ...text.error,
+          tag: "reference-source-reader",
+          code: text.error.code === "cancelled" ? "cancelled" : "io",
+        });
+      const bytes = gitByteString(`${directory}/`);
+      const projectPath =
+        context.ignoreCase === false ? bytes : foldGitCase(bytes);
+      // Caller negations may admit a directory excluded by project rules. Its
+      // children must consume that admission even without a new ignore file.
+      if (text.value === "" && !project.test(projectPath).ignored)
+        return ok(policy);
+      const inherited = ignore({ ignoreCase: false }).add(project);
+      addMarkedPatterns(
+        inherited,
+        [text.value],
+        "project-ignored",
+        directory,
+        context.ignoreCase ?? true,
+      );
+      return ok(createExclusionPolicy(inherited, context));
+    },
+  };
+  return policy;
+};
+
+/** Use the same kind interpretation for policy admission and inventory. */
+const matchIgnorePath = (
+  matcher: Pick<ReturnType<typeof ignore>, "test">,
+  path: string,
+  kind: ReferenceSourceExclusionKind,
+) => {
+  // An entry of unknown kind may be a directory, so directory-only rules
+  // must still exclude it; this fails closed for caller-marked secrets.
+  const patternPaths =
+    kind === "directory"
+      ? [`${path}/`]
+      : kind === "unknown"
+        ? [path, `${path}/`]
+        : [path];
+  const results = patternPaths.map((patternPath) => matcher.test(patternPath));
+  return results.find(({ ignored }) => ignored) ?? results[0];
+};
+
+const createShouldExclude =
+  (
+    exclusions: HistoricalSourceGraphInput["exclusions"],
+    secrets: ReturnType<typeof ignore>,
+    ignored: Pick<ReturnType<typeof ignore>, "test">,
+  ): ((path: string, kind: ReferenceSourceExclusionKind) => boolean) =>
+  (path, kind) => {
+    const secretMatch = matchIgnorePath(secrets, path, kind);
+    if (secretMatch?.ignored === true) {
+      if (!secretMatch.rule)
+        throw new Error(`Ignored secret path has no matching rule: ${path}`);
+      exclusions.push({
+        path,
+        entry_kind: kind,
+        reason: "configured-secret",
+        pattern:
+          typeof secretMatch.rule.mark === "string"
+            ? secretMatch.rule.mark
+            : secretMatch.rule.pattern,
+      });
+      return true;
+    }
+    const match = matchIgnorePath(ignored, path, kind);
+    if (match?.ignored !== true) return false;
+    if (!match.rule)
+      throw new Error(`Ignored path has no matching rule: ${path}`);
+    const mark = match.rule.mark ?? "";
+    const separator = mark.indexOf("\u0000");
+    const policySeparator = mark.indexOf("\u0000", separator + 1);
+    const reason = mark.slice(0, separator);
+    if (
+      policySeparator === -1 ||
+      (reason !== "project-ignored" &&
+        reason !== "default-ignored" &&
+        reason !== "caller-excluded")
+    )
+      throw new Error(`Ignored path has unknown rule origin: ${path}`);
+    const evidence = {
+      path,
+      entry_kind: kind,
+      pattern: mark.slice(policySeparator + 1),
+    };
+    exclusions.push(
+      reason === "project-ignored"
+        ? {
+            ...evidence,
+            reason,
+            policy_path: mark.slice(separator + 1, policySeparator),
+          }
+        : { ...evidence, reason },
+    );
+    return true;
+  };
