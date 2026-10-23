@@ -138,6 +138,7 @@ export type CliOutputArgumentValidation =
       readonly code:
         | "UNSUPPORTED_OUTPUT_COMBINATION"
         | "INVALID_OUTPUT_FILTER"
+        | "INVALID_TOKEN_WINDOW"
         | "MISSING_OUTPUT_VALUE";
       readonly message: string;
     };
@@ -153,6 +154,7 @@ interface ParsedCliOutputArguments {
   readonly tokenWindow: boolean;
   readonly tokenLimit: number | undefined;
   readonly tokenOffset: number | undefined;
+  readonly invalidTokenWindow: "--token-limit" | "--token-offset" | undefined;
 }
 
 /** Read effective Incur output controls at the executable boundary. */
@@ -166,6 +168,8 @@ export const parseCliOutputArguments = (
   let tokenCount = false;
   let tokenLimit: number | undefined;
   let tokenOffset: number | undefined;
+  let tokenLimitValid = true;
+  let tokenOffsetValid = true;
   const parsed = (parseError: boolean): ParsedCliOutputArguments => ({
     filterOutput,
     format,
@@ -177,6 +181,13 @@ export const parseCliOutputArguments = (
       !parseError && (tokenLimit !== undefined || tokenOffset !== undefined),
     tokenLimit: parseError ? undefined : tokenLimit,
     tokenOffset: parseError ? undefined : tokenOffset,
+    invalidTokenWindow: parseError
+      ? undefined
+      : !tokenLimitValid
+        ? "--token-limit"
+        : !tokenOffsetValid
+          ? "--token-offset"
+          : undefined,
   });
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
@@ -211,8 +222,14 @@ export const parseCliOutputArguments = (
         if (cliOutputValueRejection(argument, value) !== undefined)
           return parsed(true);
         const numericValue = Number(value);
-        if (argument === "--token-limit") tokenLimit = numericValue;
-        else tokenOffset = numericValue;
+        const valid = isValidTokenBound(value, numericValue);
+        if (argument === "--token-limit") {
+          tokenLimit = numericValue;
+          tokenLimitValid = valid;
+        } else {
+          tokenOffset = numericValue;
+          tokenOffsetValid = valid;
+        }
         index += 1;
       } else missingValue ??= argument;
       continue;
@@ -221,6 +238,22 @@ export const parseCliOutputArguments = (
     if (argument === "--token-count") tokenCount = true;
   }
   return parsed(false);
+};
+
+/** Check decimal integrality from the spelling, before rounding can hide it. */
+const isValidTokenBound = (raw: string, value: number): boolean => {
+  if (!Number.isSafeInteger(value) || value < 0) return false;
+  const decimal = /^[+-]?(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:e([+-]?\d+))?$/iu.exec(
+    raw.trim(),
+  );
+  // Other finite Number spellings are integer hexadecimal/binary/octal forms.
+  if (decimal === null) return true;
+  const fraction = decimal[2] ?? decimal[3] ?? "";
+  const decimalPlaces = fraction.length - Number(decimal[4] ?? 0);
+  if (decimalPlaces <= 0) return true;
+  const digits = `${decimal[1] ?? ""}${fraction}`;
+  // Underflow and huge negative exponents examine all digits, without padding.
+  return !/[1-9]/u.test(digits.slice(-decimalPlaces));
 };
 
 /** Reject slices that cannot advance within Incur's comma-delimited paths. */
@@ -245,9 +278,22 @@ const hasUnclosedFilterSlice = (expression: string): boolean => {
 export const validateCliOutputArguments = (
   arguments_: readonly string[],
 ): CliOutputArgumentValidation => {
-  const { filterOutput, format, missingValue, parseError, tokenWindow } =
-    parseCliOutputArguments(arguments_);
+  const {
+    filterOutput,
+    format,
+    missingValue,
+    parseError,
+    tokenWindow,
+    invalidTokenWindow,
+  } = parseCliOutputArguments(arguments_);
   if (parseError) return { ok: true };
+  if (invalidTokenWindow !== undefined)
+    return {
+      ok: false,
+      format: format === "yaml" || format === "jsonl" ? format : "json",
+      code: "INVALID_TOKEN_WINDOW",
+      message: `${invalidTokenWindow} requires a non-negative safe integer.`,
+    };
   if (filterOutput !== undefined && hasUnclosedFilterSlice(filterOutput))
     return {
       ok: false,

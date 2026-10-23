@@ -548,6 +548,12 @@ redirected, which keeps large results smaller for agents and scripts; pipe
 through `jq .` for indented files. Output selection and formatting do not change
 operation status.
 
+Token limits and offsets must be non-negative safe integers. Zero is valid;
+negative, fractional, or unsafe integer values fail with `INVALID_TOKEN_WINDOW`
+before the command runs.
+Decimal and exponent forms must represent exact integers, as in `5.000` or
+`500e-2`; fractional text is not accepted merely because it rounds to an integer.
+
 `--filter-output` selects fields from successful command data. Classified failures
 retain their complete typed diagnostic projection even when the selector matches
 a field such as `code` or `message`, or names a missing field. `--full-output`
