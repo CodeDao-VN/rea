@@ -26,7 +26,10 @@ import {
   InterfaceBuilderDecodeBudget,
   InterfaceBuilderDecodeBudgetExceeded,
 } from "./InterfaceBuilderDecodeBudget.js";
-import type { ArtifactEntry } from "../ArtifactReader.js";
+import {
+  ArtifactReaderFailure,
+  type ArtifactEntry,
+} from "../ArtifactReader.js";
 import {
   buildInterfaceBuilderAnalysis,
   interfaceBuilderLimitsSchema,
@@ -86,6 +89,7 @@ export const analyzeInterfaceBuilderBundle = async (input: {
       omittedArchives.push({ path, reason });
     else unreportedOmittedArchives += 1;
   };
+  let failure: { cause: unknown } | undefined;
   try {
     const selection = await selectInterfaceBuilderCandidates(
       reader,
@@ -209,6 +213,11 @@ export const analyzeInterfaceBuilderBundle = async (input: {
         });
       } catch (cause: unknown) {
         if (input.signal?.aborted === true) throw cause;
+        // A read or identity failure means the selected bytes were never
+        // established, so it is not evidence of malformed archive content:
+        // preserve its typed reason for the artifact boundary instead of
+        // reporting the document as invalid.
+        if (cause instanceof ArtifactReaderFailure) throw cause;
         if (cause instanceof InterfaceBuilderDecodeBudgetExceeded) {
           // A document rejected while decoding, e.g. beyond the shared depth
           // limit, retains no representation; later documents keep its share.
@@ -222,9 +231,26 @@ export const analyzeInterfaceBuilderBundle = async (input: {
         );
       }
     }
+  } catch (cause: unknown) {
+    failure = { cause };
   } finally {
-    await reader.close();
+    try {
+      await reader.close();
+    } catch (cause: unknown) {
+      // A close failure owns cleanup evidence but must not replace the typed
+      // primary this change exists to preserve.
+      failure = {
+        cause: ArtifactReaderFailure.withCleanup(
+          failure === undefined ? cause : failure.cause,
+          ArtifactReaderFailure.cleanupObservation(
+            cause,
+            `Interface Builder bundle reader for ${input.bundlePath}`,
+          ),
+        ),
+      };
+    }
   }
+  if (failure !== undefined) throw failure.cause;
   const result = buildInterfaceBuilderAnalysis({
     targetSha256: input.targetSha256,
     ...(input.resourceRoot === undefined
