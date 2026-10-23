@@ -5,6 +5,7 @@ import { Cli } from "incur";
 import { afterEach, expect, it, vi } from "vitest";
 
 import * as analysisViewService from "../../src/application/analysisView/AnalysisViewService.js";
+import * as evidenceInputs from "../../src/application/EvidenceInputResolver.js";
 import { WasmArtifactService } from "../../src/application/wasm/WasmArtifactService.js";
 import { registerAnalysisViewCommands } from "../../src/cli/analysisViewCommands.js";
 import { registerWasmCommands } from "../../src/cli/wasmCommands.js";
@@ -213,14 +214,20 @@ it.each([
         });
       });
     };
-    const originalProject = analysisViewService.inspectAnalysisViewValidated;
-    let projected: ReturnType<typeof originalProject> | undefined;
-    const project = vi
-      .spyOn(analysisViewService, "inspectAnalysisViewValidated")
+    const projected =
+      phase === "projection"
+        ? await analysisViewService.inspectAnalysisView(request, undefined, {
+            evidenceBundlePath: path,
+          })
+        : undefined;
+    const originalResolve = evidenceInputs.resolveEvidenceInput;
+    const resolve = vi
+      .spyOn(evidenceInputs, "resolveEvidenceInput")
       .mockImplementation((...args) => {
-        projected = originalProject(...args);
+        const resolved = originalResolve(...args);
+        // The real synchronous projection settles before this queued interrupt.
         if (phase.startsWith("projection")) queueInterrupt();
-        return projected;
+        return resolved;
       });
     const originalClose = OwnedFileHandle.prototype.close;
     const close = vi
@@ -269,7 +276,9 @@ it.each([
       );
       if (signal !== "control") expect(interruptHandled).toBe(true);
       if (phase.startsWith("authentication"))
-        expect(project).not.toHaveBeenCalled();
+        expect(resolve).not.toHaveBeenCalled();
+      if (phase.startsWith("projection"))
+        expect(resolve).toHaveBeenCalledOnce();
       if (phase === "projection") {
         if (!projected?.ok) throw new Error("Expected a completed page");
         expect(result.details.partial_observation).toEqual(projected.value);
