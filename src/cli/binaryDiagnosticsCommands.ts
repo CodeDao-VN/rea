@@ -5,6 +5,7 @@ import {
   createRecordedCrashService,
   createBinaryLayoutService,
   createElfNotesService,
+  createAppleIpsService,
   createPeResourcesService,
   createPeCertificatesService,
   createNativeExportsService,
@@ -20,6 +21,7 @@ import { inspectPeResourcesInputSchema } from "../domain/native/peResources.js";
 import { inspectPeCertificatesInputSchema } from "../domain/native/peCertificates.js";
 import { inspectNativeExportsInputSchema } from "../domain/native/nativeExports.js";
 import { inspectElfNotesInputSchema } from "../domain/native/elfNotes.js";
+import { inspectAppleIpsInputSchema } from "../domain/native/appleIps.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { finishAnalysisCommand } from "./finishAnalysisCommand.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
@@ -58,6 +60,45 @@ export const registerBinaryDiagnosticsCommands = (
               elf,
               "rea-elf-notes",
               "inspect_elf_notes",
+              signal,
+            ),
+        );
+      }),
+  });
+  cli.command(CLI_COMMANDS.inspectAppleIps, {
+    description:
+      "Inspect an Apple .ips crash report without executing a target",
+    args: z.object({
+      path: z.string().describe("Local Apple .ips crash report"),
+    }),
+    options: z.object({
+      maxFileBytes: inspectAppleIpsInputSchema.shape.max_file_bytes,
+      maxThreads: inspectAppleIpsInputSchema.shape.max_threads,
+      maxFrames: inspectAppleIpsInputSchema.shape.max_frames,
+      maxImages: inspectAppleIpsInputSchema.shape.max_images,
+    }),
+    run: ({ args, options }) =>
+      withCommandCancellation(async (signal) => {
+        const ips = createAppleIpsService();
+        return await logCliCommand(
+          logger,
+          CLI_COMMANDS.inspectAppleIps,
+          async () =>
+            finishAnalysisCommand(
+              () =>
+                ips.inspect(
+                  {
+                    path: absoluteCallerPath(args.path),
+                    max_file_bytes: options.maxFileBytes,
+                    max_threads: options.maxThreads,
+                    max_frames: options.maxFrames,
+                    max_images: options.maxImages,
+                  },
+                  { signal },
+                ),
+              ips,
+              "rea-apple-ips",
+              "inspect_apple_ips",
               signal,
             ),
         );
