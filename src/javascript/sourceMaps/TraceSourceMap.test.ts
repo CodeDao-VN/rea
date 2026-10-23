@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
+import { resolveJavaScriptSourceMapUrl } from "../../domain/javascript/javascriptSourceMapPaths.js";
 import { traceSourceMap } from "./TraceSourceMap.js";
 import { inspectSourceMap, SourceMapFormatFailure } from "./SourceMapFormat.js";
 
@@ -15,6 +16,82 @@ const leaf = {
 };
 const trace = (map: unknown, position = point) =>
   traceSourceMap(JSON.stringify(map), url, position);
+
+it.each([
+  ["https://app.test", "https://app.test/app.ts"],
+  ["https://app.test/", "https://app.test/app.ts"],
+  ["https://app.test?revision=1#context", "https://app.test/app.ts"],
+  ["http://app.test:8080", "http://app.test:8080/app.ts"],
+  [
+    "https://app.test/maps/app.js.map?next=/elsewhere/",
+    "https://app.test/maps/app.ts",
+  ],
+  [
+    "https://app.test/maps/app.js.map#part/other/",
+    "https://app.test/maps/app.ts",
+  ],
+  ["webpack:///bundle.js.map", "webpack:///app.ts"],
+  ["webpack:bundle.js.map", "app.ts"],
+  ["maps/app.js.map", "maps/app.ts"],
+  ["file:///analysis/bundle.js.map", "file:///analysis/app.ts"],
+])(
+  "resolves sources under context %s without changing its evidence",
+  (context, expected) => {
+    expect(resolveJavaScriptSourceMapUrl("app.ts", null, context)).toBe(
+      expected,
+    );
+    expect(traceSourceMap(JSON.stringify(leaf), context, point)).toMatchObject({
+      url_context: context,
+      matches: [{ reported_source: "app.ts", resolved_url: expected }],
+    });
+  },
+);
+
+it.each([
+  { ...leaf, sources: ["https://other.test/original.ts"] },
+  { ...leaf, sourceRoot: "https://other.test/", sources: ["original.ts"] },
+  {
+    version: 3,
+    sections: [
+      {
+        offset: { line: 0, column: 0 },
+        map: {
+          ...leaf,
+          sourceRoot: "https://other.test/",
+          sources: ["original.ts"],
+        },
+      },
+    ],
+  },
+])("allows source declarations to select a different authority: %j", (map) => {
+  expect(
+    traceSourceMap(JSON.stringify(map), "https://app.test", point),
+  ).toMatchObject({
+    url_context: "https://app.test",
+    matches: [{ resolved_url: "https://other.test/original.ts" }],
+  });
+});
+
+it("resolves a relative sourceRoot in an indexed leaf under a pathless context", () => {
+  const map = {
+    version: 3,
+    sections: [
+      { offset: { line: 0, column: 0 }, map: { ...leaf, sourceRoot: "src" } },
+    ],
+  };
+  expect(
+    traceSourceMap(JSON.stringify(map), "https://app.test", point),
+  ).toMatchObject({
+    url_context: "https://app.test",
+    matches: [
+      {
+        section_path: [0],
+        reported_source_root: "src",
+        resolved_url: "https://app.test/src/app.ts",
+      },
+    ],
+  });
+});
 
 it("classifies external indexed sections as unsupported with their exact URL", () => {
   const externalUrl = "https://app.test/maps/part.map?revision=7";

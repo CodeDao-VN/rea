@@ -11,9 +11,16 @@ import { webSourceLocationFixture } from "../fixtures/webSourceLocation.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
 import { cliTest } from "../support/cli/cliFixture.js";
 
-cliTest(
-  "accepts numeric UTF-16 coordinates and runs the actual owned source-map codec without a browser",
-  async ({ cli }) => {
+cliTest.for([
+  "https://app.test/app.js.map?v=1#context",
+  "https://app.test",
+  "https://app.test/",
+  "https://app.test?revision=1#context",
+])(
+  "preserves source identity and literal context through CLI and stdio MCP: %s",
+  // Allow cold CLI and MCP ownership preparation across the full parity sequence.
+  { timeout: 180_000 },
+  async (context, { cli }) => {
     const root = await createTestTempDirectory("rea-source-map-cli-");
     const fixture = webSourceLocationFixture();
     await mkdir(join(root, "files", "modules"), { recursive: true });
@@ -28,7 +35,7 @@ cliTest(
         manifest,
         "0",
         map,
-        fixture.sourceMap.url,
+        context,
         "1",
         "0",
         "--json",
@@ -41,13 +48,19 @@ cliTest(
       timeoutMs: 45000,
     });
     expect(response.exitCode, response.stdout + response.stderr).toBe(0);
-    expect(response.json).toMatchObject({
+    expect.soft(response.json).toMatchObject({
       normalized_result: {
         source: { script_index: 0 },
         source_map: { association: "caller-selected" },
         generated_offset: 0,
+        url_context: context,
         execution: "unknown",
-        matches: [{ content: { text: "original" } }],
+        matches: [
+          {
+            resolved_url: "https://app.test/original.ts",
+            content: { text: "original" },
+          },
+        ],
         runtime: {
           id: process.versions.bun === undefined ? "node-v8" : "bun",
         },
@@ -83,19 +96,25 @@ cliTest(
       arguments: {
         manifest_path: manifest,
         script_index: 0,
-        source_map: { path: map, url: fixture.sourceMap.url },
+        source_map: { path: map, url: context },
         generated_position: { line: 1, column: 0 },
       },
     });
     expect(mcpResponse.isError, JSON.stringify(mcpResponse)).not.toBe(true);
     expect(mcpResponse.structuredContent).toEqual(response.json);
+    expect.soft(mcpResponse.structuredContent).toMatchObject({
+      normalized_result: {
+        url_context: context,
+        matches: [{ resolved_url: "https://app.test/original.ts" }],
+      },
+    });
     const invalid = await cli.run({
       arguments: [
         "trace-web-source-location",
         manifest,
         "0",
         map,
-        fixture.sourceMap.url,
+        context,
         "2",
         "0",
         "--json",
@@ -109,6 +128,4 @@ cliTest(
       details: { issues: [{ path: ["generated_position"] }] },
     });
   },
-  // Allow cold CLI and MCP ownership preparation across the full parity sequence.
-  180_000,
 );

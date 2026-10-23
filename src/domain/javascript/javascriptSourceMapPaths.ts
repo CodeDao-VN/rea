@@ -54,6 +54,18 @@ export const resolveJavaScriptSourceMapReferences = (
   });
 };
 
+/** Adapt HTTP contexts to the codec's slash-based directory rule, not Evidence identity. */
+export const sourceMapCodecContext = (mapUrl: string): string => {
+  const parsed = URL.parse(mapUrl);
+  if (parsed?.protocol !== "http:" && parsed?.protocol !== "https:")
+    return mapUrl;
+  // The codec strips everything after the last literal slash. Resolve the
+  // directory first so an absent path (or a slash in a query) cannot erase
+  // the authority or become part of the directory. Other schemes retain
+  // their existing codec semantics, including virtual and file contexts.
+  return new URL(".", parsed).href;
+};
+
 /** Resolve a source declaration using the same pinned format implementation as map consumers. */
 export const resolveJavaScriptSourceMapUrl = (
   source: string | null,
@@ -81,7 +93,7 @@ const resolveSourceMapUrls = (
       ...(sourceRoot == null ? {} : { sourceRoot }),
       mappings: "",
     },
-    mapUrl,
+    sourceMapCodecContext(mapUrl),
   ).resolvedSources;
 
 /** Resolve a source-map URL reference without changing its recorded identity. */

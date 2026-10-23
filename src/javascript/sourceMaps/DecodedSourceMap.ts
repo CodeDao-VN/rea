@@ -1,4 +1,5 @@
 import { TraceMap, decodedMappings } from "@jridgewell/trace-mapping";
+import { sourceMapCodecContext } from "../../domain/javascript/javascriptSourceMapPaths.js";
 import {
   SourceMapFormatFailure,
   type SourceMapLeaf,
@@ -29,10 +30,11 @@ export const decodeValidatedSourceMapLeaves = (
   readonly map: TraceMap;
   readonly rows: ReturnType<typeof decodedMappings>;
   readonly resolvedSources: readonly string[];
-}[] =>
-  leaves.map((leaf) => {
+}[] => {
+  const codecContext = sourceMapCodecContext(mapUrl);
+  return leaves.map((leaf) => {
     check?.();
-    const map = new TraceMap(leaf.codecMap, mapUrl);
+    const map = new TraceMap(leaf.codecMap, codecContext);
     const rows = decodedMappings(map);
     for (const [line, row] of rows.entries()) {
       if ((line & 255) === 0) check?.();
@@ -56,3 +58,4 @@ export const decodeValidatedSourceMapLeaves = (
     }
     return { leaf, map, rows, resolvedSources: map.resolvedSources };
   });
+};
